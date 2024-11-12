@@ -28836,7 +28836,7 @@
 		(layer "Edge.Cuts")
 		(uuid "eadeacf4-6c52-4e06-9bdb-fc03b08963f2")
 	)
-	(gr_text "DMX IO Device HMI V0.1\nChris Markus, 2024"
+	(gr_text "DMX IO Device HMI V0.2\nChris Markus, 2024"
 		(at 192.775 37.8 0)
 		(layer "B.SilkS")
 		(uuid "70ba5e06-7e86-4449-bb41-ca8547391c9d")
@@ -28849,7 +28849,7 @@
 			(justify mirror)
 		)
 	)
-	(gr_text "DMX IO Device V0.1\nChris Markus, 2024"
+	(gr_text "DMX IO Device V0.2\nChris Markus, 2024"
 		(at 142.275 47.575 0)
 		(layer "B.SilkS")
 		(uuid "7b222080-f963-4b24-ba32-e2f90c39bcce")
