@@ -48,7 +48,7 @@
         "silk_text_thickness": 0.1524,
         "silk_text_upright": false,
         "zones": {
-          "min_clearance": 0.0
+          "min_clearance": 0.5
         }
       },
       "diff_pair_dimensions": [
@@ -181,6 +181,7 @@
         0.0,
         0.127,
         0.254,
+        0.2794,
         0.4064,
         0.508,
         0.6096,
@@ -545,7 +546,7 @@
       "plot": "",
       "pos_files": "",
       "specctra_dsn": "",
-      "step": "design_outputs/crmx-bridge-PCBA_V0.1.step",
+      "step": "design_outputs/crmx-bridge-PCBA_V0.3.step",
       "svg": "",
       "vrml": ""
     },
@@ -822,10 +823,6 @@
     [
       "1e9fdafb-c4f9-462c-81b1-f87b3764b841",
       "Root"
-    ],
-    [
-      "f4ae681e-f0f3-445e-ac1c-ad16ec521254",
-      "HMI"
     ]
   ],
   "text_variables": {}
