@@ -3,6 +3,7 @@
 #include "TimoReg.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_log.h"
 #include <array>
 #include <cstring>
 #include <string>
@@ -17,6 +18,22 @@ struct Color {
         .red = 0,
         .green = 0xFF,
         .blue = 0,
+    };
+  }
+
+  static constexpr Color Red() {
+    return Color{
+        .red = 0xFF,
+        .green = 0,
+        .blue = 0,
+    };
+  }
+
+  static constexpr Color Blue() {
+    return Color{
+        .red = 0,
+        .green = 0,
+        .blue = 0xFF,
     };
   }
 };
@@ -34,7 +51,27 @@ struct TimoSoftwareConfig {
   TIMO::RF_POWER::OUTPUT_POWER_T rf_power;
   Color universe_color;
   std::string device_name;
-  std::string universe_name;
+};
+
+struct TimoStatus {
+  bool status_valid;
+  bool is_in_update_mode;
+  bool dmx_available;
+  bool rdm_identify_active;
+  bool rf_link_active;
+  bool rf_linked;
+
+  void print_status() {
+    printf("TIMO Status:\n"
+           "         status valid: %d\n"
+           "       In update mode: %d\n"
+           "        DMX available: %d\n"
+           "  RDM identify active: %d\n"
+           "       RF link active: %d\n"
+           "            RF linked: %d\n",
+           status_valid, is_in_update_mode, dmx_available, rdm_identify_active,
+           rf_link_active, rf_linked);
+  }
 };
 
 class TimoInterface {
@@ -44,18 +81,18 @@ protected:
 
   static constexpr int64_t transaction_timeout_ms = 100;
 
-  struct __attribute__((packed)) SpiTxRxBuf {
+  template <size_t data_size> struct __attribute__((packed)) SpiTxRxBuf {
     uint8_t irq_flags;
-    std::array<uint8_t, max_reg_size> data;
+    std::array<uint8_t, data_size> data;
 
     uint8_t *raw() { return reinterpret_cast<uint8_t *>(this); }
     void clear() {
       irq_flags = 0;
-      memset(data.data(), 0, max_reg_size);
+      memset(data.data(), 0, data_size);
     }
     void prep_tx() { irq_flags = 0xFF; }
     static constexpr size_t spi_transaction_size(const size_t data_len) {
-      return (data_len > max_reg_size ? max_reg_size : data_len) + 1;
+      return (data_len > data_size ? data_size : data_len) + 1;
     }
   };
 
@@ -89,16 +126,22 @@ public:
 
   esp_err_t init(const spi_host_device_t bus);
 
-  // config functions
+  // Config functions
   esp_err_t set_sw_config(const TimoSoftwareConfig &_sw_config);
   esp_err_t set_radio_en(const bool en);
   esp_err_t set_rf_power(const TIMO::RF_POWER::OUTPUT_POWER_T pwr);
   esp_err_t set_rf_protocol(const TIMO::RF_PROTOCOL::TX_PROTOCOL_T protocol);
   esp_err_t set_tx_rx_mode(const TIMO::CONFIG::RADIO_TX_RX_MODE_T tx_rx_mode);
-  esp_err_t set_dmx_source(const TIMO::DMX_SOURCE::DATA_SOURCE_T dmx_source);
   esp_err_t set_universe_color(const Color color);
   esp_err_t set_device_name(const std::string device_name);
-  esp_err_t set_universe_name(const std::string universe_name);
+  esp_err_t set_dmx_source(const TIMO::DMX_SOURCE::DATA_SOURCE_T source);
+
+  // Status functions
+  esp_err_t get_dmx_source(TIMO::DMX_SOURCE::DATA_SOURCE_T &source);
+  TimoStatus get_status();
+
+  // DMX functions
+  esp_err_t write_dmx(const std::array<uint8_t, 512> &data);
 
 protected:
   bool is_ready();
@@ -108,7 +151,8 @@ protected:
                          const size_t len);
 
   template <uint8_t addr, typename T, size_t len>
-  esp_err_t write_reg(const Register<addr, T, len> &reg) {
+  esp_err_t write_reg(const Register<addr, T, len> &reg,
+                      const bool verify = true) {
     memcpy(tx_buf.data.data(), reg.raw(), reg.raw_len());
     tx_buf.prep_tx();
     rx_buf.clear();
@@ -117,6 +161,19 @@ protected:
     if (res != ESP_OK) {
       return res;
     }
+
+    if (verify) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+
+      Register<addr, T, len> readback;
+      esp_err_t res = read_reg(readback);
+      if (res != ESP_OK || reg != readback) {
+        ESP_LOGE("TIMO", "Register %x verify failed: %x != %x", addr,
+                 reg.data[0], readback.data[0]);
+        return ESP_FAIL;
+      }
+    }
+
     return ESP_OK;
   }
 
@@ -131,7 +188,7 @@ protected:
     if (res != ESP_OK) {
       return res;
     }
-    memcpy(reg.data(), rx_buf.data.data(), reg.raw_len());
+    memcpy(reg.data.data(), rx_buf.data.data(), reg.raw_len());
     return ESP_OK;
   }
 
@@ -139,14 +196,14 @@ protected:
   TimoSoftwareConfig sw_config;
   spi_device_handle_t handle;
   bool is_init;
-  SpiTxRxBuf tx_buf;
-  SpiTxRxBuf rx_buf;
+  SpiTxRxBuf<max_reg_size> tx_buf;
+  SpiTxRxBuf<max_reg_size> rx_buf;
 };
 
 namespace {
 class Test : TimoInterface {
-  static_assert(sizeof(SpiTxRxBuf) == max_reg_size + 1);
-  static_assert(sizeof(SpiTxRxBuf) ==
-                SpiTxRxBuf::spi_transaction_size(max_reg_size));
+  static_assert(sizeof(SpiTxRxBuf<max_reg_size>) == max_reg_size + 1);
+  static_assert(sizeof(SpiTxRxBuf<max_reg_size>) ==
+                SpiTxRxBuf<max_reg_size>::spi_transaction_size(max_reg_size));
 };
 } // namespace

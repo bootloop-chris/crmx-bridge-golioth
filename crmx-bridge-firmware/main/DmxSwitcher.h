@@ -14,25 +14,40 @@ enum class DmxSourceSink : uint32_t {
 };
 
 static constexpr size_t dmx_packet_size = 512;
-static constexpr TickType_t dmx_switcher_period = pdMS_TO_TICKS(5);
+static constexpr TickType_t dmx_switcher_period_min = pdMS_TO_TICKS(1);
+static constexpr TickType_t dmx_switcher_period_max = pdMS_TO_TICKS(5);
 
 struct DmxPacket {
   DmxSourceSink source;
-  std::array<uint8_t, dmx_packet_size> data;
+  struct PACKED_ATTR {
+    uint8_t start_code;
+    std::array<uint8_t, dmx_packet_size> data;
+    static constexpr size_t size() { return dmx_packet_size + 1; }
+  } full_packet;
 };
+static_assert(sizeof(decltype(DmxPacket::full_packet)) == dmx_packet_size + 1);
 
-class DmxSwitcher {};
+class DmxSwitcher;
 
 class DmxInterface {
 public:
   static constexpr size_t dmx_queue_size = 1;
 
-  void send(const DmxPacket &packet) { xQueueOverwrite(tx_queue, &packet); }
+  void send(const DmxPacket &packet) {
+    if (tx_queue == nullptr) {
+      return;
+    }
+    xQueueOverwrite(tx_queue, &packet);
+  }
   bool recieve(DmxPacket &packet, const TickType_t timeout) {
+    if (rx_queue == nullptr) {
+      return false;
+    }
     return xQueueReceive(rx_queue, &packet, timeout) == pdTRUE;
   }
 
   esp_err_t init();
+  void deinit();
 
 protected:
   QueueHandle_t tx_queue;
@@ -45,11 +60,11 @@ class DmxSwitcher {
 
 public:
   esp_err_t init();
+  void deinit();
   void dispatch();
 
   // These functions should be thread-safe.
-  esp_err_t set_src(const DmxSourceSink source);
-  esp_err_t set_sink(const DmxSourceSink sink);
+  esp_err_t set_src_sink(const DmxSourceSink src, const DmxSourceSink sink);
 
   static DmxSwitcher &get_switcher();
 
@@ -59,10 +74,10 @@ public:
 
 protected:
   /* Custom notifications start at 1. */
-  enum class Notification : uint32_t {
-    set_src = 1,
-    set_sink = 2,
-  };
+  //   enum class Notification : uint32_t {
+  //     set_src = 1,
+  //     set_sink = 2,
+  //   };
 
   QueueHandle_t get_src_queue() {
     switch (active_src) {
@@ -94,6 +109,7 @@ protected:
 
   TaskHandle_t switcher_task;
 
+  SemaphoreHandle_t src_sink_mutex_handle;
   DmxSourceSink active_src;
   DmxSourceSink active_sink;
 

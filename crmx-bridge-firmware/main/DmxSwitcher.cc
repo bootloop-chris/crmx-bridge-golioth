@@ -11,9 +11,10 @@ static inline constexpr U underlying(T val) {
   return static_cast<U>(val);
 }
 
-DmxSwitcher &get_switcher() { return dmx_switcher; }
+DmxSwitcher &DmxSwitcher::get_switcher() { return dmx_switcher; }
 
-extern "C" static void dmx_switcher_task(void *pvParameters) {
+extern "C" {
+static void dmx_switcher_task(void *pvParameters) {
   DmxSwitcher *_switcher = static_cast<DmxSwitcher *>(pvParameters);
   if (_switcher == nullptr) {
     return;
@@ -26,8 +27,9 @@ extern "C" static void dmx_switcher_task(void *pvParameters) {
   while (true) {
     _switcher->dispatch();
     // Wait for the next cycle.
-    vTaskDelayUntil(&xLastWakeTime, dmx_switcher_period);
+    vTaskDelayUntil(&xLastWakeTime, dmx_switcher_period_min);
   }
+}
 }
 
 esp_err_t DmxInterface::init() {
@@ -44,6 +46,11 @@ esp_err_t DmxInterface::init() {
   return ESP_OK;
 }
 
+void DmxInterface::deinit() {
+  vQueueDelete(tx_queue);
+  vQueueDelete(rx_queue);
+}
+
 esp_err_t DmxSwitcher::init() {
 
   esp_err_t ret = ESP_ERROR_CHECK_WITHOUT_ABORT(timo_interface.init());
@@ -51,13 +58,19 @@ esp_err_t DmxSwitcher::init() {
     return ESP_ERR_NO_MEM;
   }
 
-  esp_err_t ret = ESP_ERROR_CHECK_WITHOUT_ABORT(onboard_interface.init());
+  ret = ESP_ERROR_CHECK_WITHOUT_ABORT(onboard_interface.init());
   if (ret != ESP_OK) {
     return ESP_ERR_NO_MEM;
   }
 
-  esp_err_t ret = ESP_ERROR_CHECK_WITHOUT_ABORT(artnet_interface.init());
+  ret = ESP_ERROR_CHECK_WITHOUT_ABORT(artnet_interface.init());
   if (ret != ESP_OK) {
+    return ESP_ERR_NO_MEM;
+  }
+
+  src_sink_mutex_handle = xSemaphoreCreateMutex();
+  if (src_sink_mutex_handle == nullptr) {
+    ESP_LOGE(TAG, "Could not create mutex!");
     return ESP_ERR_NO_MEM;
   }
 
@@ -72,47 +85,42 @@ esp_err_t DmxSwitcher::init() {
   return ESP_OK;
 }
 
+void DmxSwitcher::deinit() {
+  vTaskDelete(switcher_task);
+  timo_interface.deinit();
+  onboard_interface.deinit();
+  artnet_interface.deinit();
+}
+
 void DmxSwitcher::dispatch() {
 
-  uint32_t _src;
-  if (xTaskNotifyWaitIndexed(underlying(Notification::set_src), 0, ULONG_MAX,
-                             &_src, 0) == pdPASS) {
-    active_src = static_cast<DmxSourceSink>(_src);
-  }
-
-  uint32_t _sink;
-  if (xTaskNotifyWaitIndexed(underlying(Notification::set_sink), 0, ULONG_MAX,
-                             &_sink, 0) == pdPASS) {
-    active_sink = static_cast<DmxSourceSink>(_sink);
-  }
-
+  xSemaphoreTake(src_sink_mutex_handle, dmx_switcher_period_max);
   QueueHandle_t src_queue = get_src_queue();
   QueueHandle_t sink_queue = get_sink_queue();
+  xSemaphoreGive(src_sink_mutex_handle);
 
   if (src_queue == nullptr || sink_queue == nullptr) {
     return;
   }
 
   DmxPacket packet;
-  if (xQueueReceive(src_queue, &packet, 0)) {
+  if (xQueueReceive(src_queue, &packet, dmx_switcher_period_max)) {
     xQueueOverwrite(sink_queue, &packet);
   }
 }
 
-esp_err_t DmxSwitcher::set_src(const DmxSourceSink source) {
-  if (switcher_task == nullptr) {
-    return ESP_ERR_INVALID_STATE;
+esp_err_t DmxSwitcher::set_src_sink(const DmxSourceSink src,
+                                    const DmxSourceSink sink) {
+  bool taken = xSemaphoreTake(src_sink_mutex_handle, pdMS_TO_TICKS(2));
+  if (taken) {
+    active_src = src;
+    active_sink = sink;
+    if (xSemaphoreGive(src_sink_mutex_handle) != pdPASS) {
+      return ESP_ERR_INVALID_RESPONSE;
+    }
+  } else {
+    return ESP_ERR_TIMEOUT;
   }
-  xTaskNotifyIndexed(switcher_task, underlying(Notification::set_src),
-                     underlying(source), eSetValueWithOverwrite);
-  return ESP_OK;
-}
 
-esp_err_t DmxSwitcher::set_sink(const DmxSourceSink sink) {
-  if (switcher_task == nullptr) {
-    return ESP_ERR_INVALID_STATE;
-  }
-  xTaskNotifyIndexed(switcher_task, underlying(Notification::set_sink),
-                     underlying(sink), eSetValueWithOverwrite);
   return ESP_OK;
 }

@@ -92,6 +92,10 @@ template <uint8_t _address, typename T, size_t _reg_len> struct Register {
     static_assert(F::offset < reg_len);
     return get_field<F>(data[F::offset]);
   }
+
+  inline bool operator==(const Register<_address, T, _reg_len> &other) {
+    return other.data == data;
+  }
 };
 
 // Tests
@@ -227,8 +231,6 @@ struct RF_PROTOCOL : public Register<0x0C, uint8_t, 1> {
 };
 
 struct DMX_SOURCE : public Register<0x0D, uint8_t, 1> {
-  static constexpr Field<uint8_t, 0, 8> DATA_SOURCE = {};
-
   enum class DATA_SOURCE_T : uint8_t {
     NO_DATA = 0,
     UART_DMX = 1,
@@ -236,6 +238,8 @@ struct DMX_SOURCE : public Register<0x0D, uint8_t, 1> {
     SPI = 3,
     BLE = 4,
   };
+
+  static constexpr Field<uint8_t, 0, 8> DATA_SOURCE = {};
 };
 
 struct LOLLIPOP : public Register<0x0E, uint8_t, 1> {

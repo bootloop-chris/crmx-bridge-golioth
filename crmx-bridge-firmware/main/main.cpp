@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-const static char *TAG = "EXAMPLE";
+const static char *TAG = "main";
 
 static constexpr adc_channel_t pwr_btn_sns_chann = ADC_CHANNEL_3;
 static constexpr gpio_num_t pwr_in_ctrl_pin = GPIO_NUM_5;
@@ -37,8 +37,9 @@ static constexpr TimoHardwareConfig timo_config = {
     .nirq_pin = GPIO_NUM_9,
     .spi_devcfg =
         {
-            .mode = 0,                         // SPI mode 0 (CPOL 0, CPHA0)
-            .clock_speed_hz = 1 * 1000 * 1000, // 10 MHz
+            .mode = 0, // SPI mode 0 (CPOL 0, CPHA0)
+            .cs_ena_pretrans = 6,
+            .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz
             .spics_io_num = GPIO_NUM_10,       // CS pin
             .queue_size = 7, // 7 transactions queued at a time?
         },
@@ -87,30 +88,6 @@ extern "C" void onboard_dmx_task(void *pvParameters) {
     return;
   }
 
-  uint8_t dmx_data[DMX_PACKET_SIZE];
-  dmx_packet_t dmx_packet;
-
-  while (true) {
-    if (dmx_receive(dmx_in_cfg.port, &dmx_packet, DMX_TIMEOUT_TICK)) {
-      if (dmx_packet.err == DMX_OK) {
-        size_t data_len = dmx_read(dmx_in_cfg.port, dmx_data, dmx_packet.size);
-        printf("DMX Data (%d): ", data_len);
-        for (size_t i = 0; i < 8 && i < data_len; i++) {
-          printf("%x ", dmx_data[i]);
-        }
-        printf("\n");
-        dmx_write(dmx_out_cfg.port, dmx_data, data_len);
-        dmx_send(dmx_out_cfg.port);
-        printf("Sent DMX Packet\n");
-      } else {
-        printf("An error occurred receiving DMX!\n");
-      }
-    }
-    vTaskDelay(pdMS_TO_TICKS(5));
-  }
-}
-
-void init_dmx(DmxInterface &interface) {
   // First, use the default DMX configuration...
   dmx_config_t dmx_config = DMX_CONFIG_DEFAULT;
 
@@ -139,9 +116,54 @@ void init_dmx(DmxInterface &interface) {
   };
 
   ESP_ERROR_CHECK(gpio_config(&dmx_io_conf));
+
+  dmx_packet_t rx_meta;
+
+  DmxPacket tx_packet;
+  DmxPacket rx_packet;
+
+  ESP_LOGI(TAG, "Finished Onboard DMX Init");
+
+  while (true) {
+    if (dmx_receive(dmx_in_cfg.port, &rx_meta, DMX_TIMEOUT_TICK)) {
+      // 513 to account for start code.. I think?
+      if (rx_meta.err != DMX_OK ||
+          rx_meta.size > sizeof(rx_packet.full_packet)) {
+        ESP_LOGE(TAG, "DMX Packet Error: %d, %zu", rx_meta.err, rx_meta.size);
+      } else {
+        size_t data_len = dmx_read(dmx_in_cfg.port, &rx_packet.full_packet,
+                                   rx_packet.full_packet.size());
+        if (data_len == rx_packet.full_packet.size()) {
+          interface->send(rx_packet);
+        } else {
+          ESP_LOGE(TAG, "Recieved short DMX packet: %zu", data_len);
+        }
+      }
+    }
+
+    if (interface->recieve(tx_packet, 0)) {
+      size_t written_len = dmx_write(dmx_out_cfg.port, &tx_packet.full_packet,
+                                     tx_packet.full_packet.size());
+      if (written_len != tx_packet.full_packet.size()) {
+        ESP_LOGE(TAG, "Wrote short DMX Packet: %zu", written_len);
+      }
+      written_len = dmx_send(dmx_out_cfg.port);
+      if (written_len != tx_packet.full_packet.size()) {
+        ESP_LOGE(TAG, "Sent short DMX Packet: %zu", written_len);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
 }
 
-void init_timo(DmxInterface &interface) {
+extern "C" void timo_dmx_task(void *pvParameters) {
+  DmxInterface *interface = static_cast<DmxInterface *>(pvParameters);
+
+  if (interface == nullptr) {
+    ESP_LOGE(TAG, "Invalid DMX Interface");
+    return;
+  }
+
   // Initialize the SPI bus
   ESP_ERROR_CHECK(
       spi_bus_initialize(timo_spi_bus, &spi_bus_cfg, SPI_DMA_CH_AUTO));
@@ -156,11 +178,30 @@ void init_timo(DmxInterface &interface) {
       .rf_protocol = RF_PROTOCOL::TX_PROTOCOL_T::CRMX,
       .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
       .rf_power = RF_POWER::OUTPUT_POWER_T::PWR_40_MW,
-      .universe_color = Color::Green(),
-      .device_name = "device",
-      .universe_name = "universe",
+      .universe_color = Color::Red(),
+      .device_name = "CRMXBridge",
   };
   ESP_ERROR_CHECK(timo_interface.set_sw_config(sw_config));
+
+  ESP_LOGI(TAG, "Finished Timo Init");
+
+  int64_t last_print = esp_timer_get_time();
+
+  TickType_t xLastWakeTime;
+  DmxPacket packet;
+
+  while (true) {
+    if (interface->recieve(packet, pdMS_TO_TICKS(5))) {
+      if (timo_interface.write_dmx(packet.full_packet.data) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write dmx from source %d",
+                 static_cast<int>(packet.source));
+      }
+    }
+
+    // TODO: Timo RX
+
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
+  }
 }
 
 extern "C" void app_main(void) {
@@ -200,53 +241,54 @@ extern "C" void app_main(void) {
   DmxSwitcher &switcher = DmxSwitcher::get_switcher();
   ESP_ERROR_CHECK(switcher.init());
 
-  init_dmx(switcher.get_onboard_interface());
-  init_timo(switcher.get_timo_interface());
+  // Start onboard DMX
+  TaskHandle_t onboard_dmx_task_handle;
+  if (xTaskCreate(onboard_dmx_task, "onboard_dmx", 4096,
+                  &switcher.get_onboard_interface(), 3,
+                  &onboard_dmx_task_handle) != pdPASS ||
+      onboard_dmx_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create onboard_dmx task");
+    abort();
+  }
 
+  // Start TIMO
+  TaskHandle_t timo_dmx_task_handle;
+  if (xTaskCreate(timo_dmx_task, "timo_dmx", 4096,
+                  &switcher.get_timo_interface(), 3,
+                  &timo_dmx_task_handle) != pdPASS ||
+      timo_dmx_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create timo_dmx task");
+    abort();
+  }
+
+  switcher.set_src_sink(DmxSourceSink::onboard, DmxSourceSink::timo);
+
+  // Handle power in the main task
   uint64_t pwr_btn_press_start = 0;
   bool pwr_btn_released = false;
-
   while (1) {
     int adc_raw = 0;
     int adc_volts = 0;
-    // ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, pwr_btn_sns_chann,
-    // &adc_raw)); if (do_calibration1_chan0) {
-    //   ESP_ERROR_CHECK(
-    //       adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw,
-    //       &adc_volts));
-    //   if (adc_volts < pwr_btn_press_thresh_mv) {
-    //     pwr_btn_released = true;
-    //   }
-    //   if (!pwr_btn_released || adc_volts < pwr_btn_press_thresh_mv) {
-    //     pwr_btn_press_start = esp_timer_get_time();
-    //   }
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, pwr_btn_sns_chann, &adc_raw));
+    if (do_calibration1_chan0) {
+      ESP_ERROR_CHECK(
+          adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &adc_volts));
+      if (adc_volts < pwr_btn_press_thresh_mv) {
+        pwr_btn_released = true;
+      }
+      if (!pwr_btn_released || adc_volts < pwr_btn_press_thresh_mv) {
+        pwr_btn_press_start = esp_timer_get_time();
+      }
 
-    //   if (esp_timer_get_time() - pwr_btn_press_start > 1000000) {
-    //     ESP_LOGI(TAG, "Power button press detected, powering down.");
-    //     vTaskDelay(pdMS_TO_TICKS(1000));
-    //     gpio_set_level(pwr_in_ctrl_pin, false);
-    //     vTaskDelay(portMAX_DELAY);
-    //   }
-    // }
-
-    /* Loopback - RX on in, TX on out. */
-    if (dmx_receive(dmx_in_cfg.port, &dmx_packet, DMX_TIMEOUT_TICK)) {
-      if (dmx_packet.err == DMX_OK) {
-        size_t data_len = dmx_read(dmx_in_cfg.port, dmx_data, dmx_packet.size);
-        printf("DMX Data (%d): ", data_len);
-        for (size_t i = 0; i < 8 && i < data_len; i++) {
-          printf("%x ", dmx_data[i]);
-        }
-        printf("\n");
-        dmx_write(dmx_out_cfg.port, dmx_data, data_len);
-        dmx_send(dmx_out_cfg.port);
-        printf("Sent DMX Packet\n");
-      } else {
-        printf("An error occurred receiving DMX!\n");
+      if (esp_timer_get_time() - pwr_btn_press_start > 1000000) {
+        ESP_LOGI(TAG, "Power button press detected, powering down.");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        gpio_set_level(pwr_in_ctrl_pin, false);
+        vTaskDelay(portMAX_DELAY);
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 
   // Tear Down
@@ -254,6 +296,9 @@ extern "C" void app_main(void) {
   if (do_calibration1_chan0) {
     adc_calibration_deinit(adc1_cali_chan0_handle);
   }
+
+  switcher.deinit();
+  vTaskDelete(onboard_dmx_task_handle);
 }
 
 /*---------------------------------------------------------------
