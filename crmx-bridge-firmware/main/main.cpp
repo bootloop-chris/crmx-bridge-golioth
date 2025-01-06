@@ -9,9 +9,12 @@
 #include "esp_dmx.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "font8x8_basic.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "rotary_encoder.h"
 #include "soc/soc_caps.h"
+#include "ssd1306.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +49,15 @@ static constexpr TimoHardwareConfig timo_config = {
 };
 
 TimoInterface timo_interface{timo_config};
+
+static constexpr gpio_num_t led_r_pin = GPIO_NUM_15;
+static constexpr gpio_num_t led_r_pin = GPIO_NUM_7;
+static constexpr gpio_num_t led_r_pin = GPIO_NUM_6;
+static constexpr gpio_num_t btn_ok_pin = GPIO_NUM_35;
+static constexpr gpio_num_t btn_bk_pin = GPIO_NUM_36;
+static constexpr gpio_num_t btn_enc_pin = GPIO_NUM_41;
+static constexpr gpio_num_t enc_a_pin = GPIO_NUM_37;
+static constexpr gpio_num_t enc_b_pin = GPIO_NUM_38;
 
 //------------- DMX Configs ---------------//
 
@@ -164,6 +176,9 @@ extern "C" void timo_dmx_task(void *pvParameters) {
     return;
   }
 
+  // Give TIMO a while to power on.
+  vTaskDelay(pdMS_TO_TICKS(2000));
+
   // Initialize the SPI bus
   ESP_ERROR_CHECK(
       spi_bus_initialize(timo_spi_bus, &spi_bus_cfg, SPI_DMA_CH_AUTO));
@@ -202,6 +217,41 @@ extern "C" void timo_dmx_task(void *pvParameters) {
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
   }
+}
+
+void oled_test() {
+  SSD1306_t dev;
+  int center = 3;
+
+  // TODO: move all the params out of menuconfig
+  // Notably, this OLED requires an x offset of 2.
+  i2c_master_init(&dev, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO);
+  dev._flip = true;
+
+  ssd1306_init(&dev, 128, 64);
+
+  ssd1306_clear_screen(&dev, false);
+  ssd1306_contrast(&dev, 0xff);
+  ssd1306_display_text(&dev, 0, "CRMX Bridge.", 11, false);
+}
+
+void init_hmi() {
+  // esp32-rotary-encoder requires that the GPIO ISR service is installed before
+  // calling rotary_encoder_register()
+  ESP_ERROR_CHECK(gpio_install_isr_service(0));
+
+  // Initialise the rotary encoder device with the GPIOs for A and B signals
+  rotary_encoder_info_t info = {0};
+  ESP_ERROR_CHECK(rotary_encoder_init(&info, ROT_ENC_A_GPIO, ROT_ENC_B_GPIO));
+  ESP_ERROR_CHECK(rotary_encoder_enable_half_steps(&info, ENABLE_HALF_STEPS));
+#ifdef FLIP_DIRECTION
+  ESP_ERROR_CHECK(rotary_encoder_flip_direction(&info));
+#endif
+
+  // Create a queue for events from the rotary encoder driver.
+  // Tasks can read from this queue to receive up to date position information.
+  QueueHandle_t event_queue = rotary_encoder_create_queue();
+  ESP_ERROR_CHECK(rotary_encoder_set_queue(&info, event_queue));
 }
 
 extern "C" void app_main(void) {
@@ -262,6 +312,8 @@ extern "C" void app_main(void) {
   }
 
   switcher.set_src_sink(DmxSourceSink::onboard, DmxSourceSink::timo);
+
+  oled_test();
 
   // Handle power in the main task
   uint64_t pwr_btn_press_start = 0;
