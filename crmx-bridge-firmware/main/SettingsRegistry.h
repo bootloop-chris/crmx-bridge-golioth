@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Color.h"
 #include "freertos/FreeRTOS.h"
 
 class Settings {

@@ -282,7 +282,7 @@ esp_err_t TimoInterface::set_rf_protocol(
   return ESP_OK;
 }
 
-esp_err_t TimoInterface::set_universe_color(const Color color) {
+esp_err_t TimoInterface::set_universe_color(const RGBColor color) {
   INIT_GUARD();
 
   UNIVERSE_COLOR reg;

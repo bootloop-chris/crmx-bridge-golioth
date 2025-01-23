@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Color.h"
 #include "TimoReg.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -7,36 +8,6 @@
 #include <array>
 #include <cstring>
 #include <string>
-
-struct Color {
-  uint8_t red;
-  uint8_t green;
-  uint8_t blue;
-
-  static constexpr Color Green() {
-    return Color{
-        .red = 0,
-        .green = 0xFF,
-        .blue = 0,
-    };
-  }
-
-  static constexpr Color Red() {
-    return Color{
-        .red = 0xFF,
-        .green = 0,
-        .blue = 0,
-    };
-  }
-
-  static constexpr Color Blue() {
-    return Color{
-        .red = 0,
-        .green = 0,
-        .blue = 0xFF,
-    };
-  }
-};
 
 struct TimoHardwareConfig {
   gpio_num_t nirq_pin;
@@ -49,7 +20,7 @@ struct TimoSoftwareConfig {
   TIMO::RF_PROTOCOL::TX_PROTOCOL_T rf_protocol;
   TIMO::DMX_SOURCE::DATA_SOURCE_T dmx_source;
   TIMO::RF_POWER::OUTPUT_POWER_T rf_power;
-  Color universe_color;
+  RGBColor universe_color;
   std::string device_name;
 };
 
@@ -132,7 +103,7 @@ public:
   esp_err_t set_rf_power(const TIMO::RF_POWER::OUTPUT_POWER_T pwr);
   esp_err_t set_rf_protocol(const TIMO::RF_PROTOCOL::TX_PROTOCOL_T protocol);
   esp_err_t set_tx_rx_mode(const TIMO::CONFIG::RADIO_TX_RX_MODE_T tx_rx_mode);
-  esp_err_t set_universe_color(const Color color);
+  esp_err_t set_universe_color(const RGBColor color);
   esp_err_t set_device_name(const std::string device_name);
   esp_err_t set_dmx_source(const TIMO::DMX_SOURCE::DATA_SOURCE_T source);
 

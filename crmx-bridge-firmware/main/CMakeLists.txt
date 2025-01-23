@@ -1,4 +1,7 @@
-idf_component_register(SRCS "SettingsRegistry.cc" "DmxSwitcher.cc" "TimoInterface.cc" "main.cpp"
-                    INCLUDE_DIRS "."
-                    REQUIRES esp_dmx ssd1306 esp32-rotary-encoder
-                    PRIV_REQUIRES esp_adc)
+idf_component_register(
+    SRCS "main.cc" "SettingsRegistry.cc" "DmxSwitcher.cc" "TimoInterface.cc" "ssd1106.c"
+         "ui/ui_main.cc" "ui/HomePage.cc" "ui/Style.cc"
+    INCLUDE_DIRS "." "./ui"
+    REQUIRES esp_dmx esp32-rotary-encoder esp_lcd
+    PRIV_REQUIRES esp_adc
+)
