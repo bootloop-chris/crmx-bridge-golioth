@@ -31,8 +31,9 @@ PopupSelector::PopupSelector(lv_obj_t *parent)
     : UIComponent(lv_list_create(parent)) {
   lv_obj_set_size(root, LV_PCT(90), LV_PCT(90));
   lv_obj_center(root);
-  lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_ON);
   lv_obj_set_style_border_width(root, 1, LV_STATE_DEFAULT);
+  lv_obj_set_style_bg_color(root, Style::fg_color, LV_PART_SCROLLBAR);
+  lv_obj_set_style_width(root, 2, LV_PART_SCROLLBAR);
 }
 
 void PopupSelector::set_data(const PopupSelectorData &data) {
@@ -56,7 +57,25 @@ void PopupSelector::set_data(const PopupSelectorData &data) {
     };
     lv_obj_add_event_cb(items[i], popup_select_action_handler, LV_EVENT_CLICKED,
                         &(item_actions[i]));
+    lv_obj_set_width(items[i],
+                     lv_obj_get_width(root) - Style::button_border_width * 2);
     Style::get().style_button(items[i]);
+    lv_obj_set_style_text_align(items[i], LV_TEXT_ALIGN_CENTER,
+                                LV_STATE_DEFAULT);
+  }
+
+  // If the list height is less than the screen height, reduce the popup height
+  // to the list height
+  lv_obj_set_size(root, LV_PCT(90), LV_PCT(90));
+  lv_obj_update_layout(root);
+  const auto end_y = lv_obj_get_y(items[num_items - 1]) +
+                     lv_obj_get_height(items[num_items - 1]) +
+                     Style::button_border_width * 2;
+  if (end_y < lv_obj_get_height(root)) {
+    lv_obj_set_height(root, end_y);
+    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
+  } else {
+    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_ON);
   }
 
   lv_group_focus_obj(items[0]);

@@ -36,6 +36,8 @@ protected:
   bool is_init = false;
 
 public:
+  static constexpr int32_t button_border_width = 1;
+
   // TODO: made these const
   lv_style_t btn_style_base;
   lv_style_t btn_style_focus;
