@@ -2,6 +2,7 @@
 #include "stddef.h"
 #include "stdint.h"
 #include <array>
+#include <string>
 #include <type_traits>
 
 /**
@@ -131,6 +132,21 @@ struct CONFIG : public Register<0x00, uint8_t, 1> {
     RX = 0,
     TX = 1,
   };
+
+  static constexpr std::array<RADIO_TX_RX_MODE_T, 2> RADIO_TX_RX_MODE_T_ENUM = {
+      RADIO_TX_RX_MODE_T::RX, RADIO_TX_RX_MODE_T::TX};
+
+  static constexpr std::string
+  radio_tx_rx_mode_to_str(const RADIO_TX_RX_MODE_T mode) {
+    switch (mode) {
+    case RADIO_TX_RX_MODE_T::RX:
+      return "RX";
+    case RADIO_TX_RX_MODE_T::TX:
+      return "TX";
+    default:
+      return "Unknown";
+    }
+  }
 };
 
 struct STATUS : public Register<0x01, uint8_t, 1> {
@@ -228,6 +244,23 @@ struct RF_PROTOCOL : public Register<0x0C, uint8_t, 1> {
     W_DMX_G3 = 1,
     W_DMX_G4S = 2,
   };
+
+  static constexpr std::array<TX_PROTOCOL_T, 3> TX_PROTOCOL_T_ENUM = {
+      TX_PROTOCOL_T::CRMX, TX_PROTOCOL_T::W_DMX_G3, TX_PROTOCOL_T::W_DMX_G4S};
+
+  static constexpr std::string
+  tx_protocol_to_str(const TX_PROTOCOL_T protocol) {
+    switch (protocol) {
+    case TX_PROTOCOL_T::CRMX:
+      return "CRMX";
+    case TX_PROTOCOL_T::W_DMX_G3:
+      return "WDMX G3";
+    case TX_PROTOCOL_T::W_DMX_G4S:
+      return "WDMX G4S";
+    default:
+      return "Unknown";
+    }
+  }
 };
 
 struct DMX_SOURCE : public Register<0x0D, uint8_t, 1> {
@@ -266,6 +299,25 @@ struct RF_POWER : public Register<0x11, uint8_t, 1> {
     PWR_13_MW = 4,
     PWR_3_MW = 5,
   };
+
+  static constexpr std::array<OUTPUT_POWER_T, 4> OUTPUT_POWER_T_ENUM = {
+      OUTPUT_POWER_T::PWR_100_MW, OUTPUT_POWER_T::PWR_40_MW,
+      OUTPUT_POWER_T::PWR_13_MW, OUTPUT_POWER_T::PWR_3_MW};
+
+  static constexpr int output_power_to_int_mw(const OUTPUT_POWER_T pwr) {
+    switch (pwr) {
+    case OUTPUT_POWER_T::PWR_100_MW:
+      return 100;
+    case OUTPUT_POWER_T::PWR_40_MW:
+      return 40;
+    case OUTPUT_POWER_T::PWR_13_MW:
+      return 13;
+    case OUTPUT_POWER_T::PWR_3_MW:
+      return 3;
+    default:
+      return -1;
+    }
+  }
 };
 
 struct BLOCKED_CHANNELS : public Register<0x12, uint8_t, 11> {
@@ -307,6 +359,20 @@ struct LINKING_KEY_RX : public Register<0x21, uint8_t, 10> {
     CRMX_CLASSIC = 0,
     CRMX_2 = 1,
   };
+
+  static constexpr std::array<MODE_T, 2> MODE_T_ENUM = {MODE_T::CRMX_CLASSIC,
+                                                        MODE_T::CRMX_2};
+
+  static constexpr std::string mode_to_str(const MODE_T mode) {
+    switch (mode) {
+    case MODE_T::CRMX_CLASSIC:
+      return "CRMX Classic";
+    case MODE_T::CRMX_2:
+      return "CRMX 2";
+    default:
+      return "Unknown";
+    }
+  }
 };
 
 struct LINKING_KEY_TX : public Register<0x21, uint8_t, 8> {

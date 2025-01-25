@@ -12,7 +12,7 @@
     }                                                                          \
   } while (false)
 
-static const char *TAG = "TIMO";
+static constexpr char const *TAG = "TIMO";
 
 using namespace TIMO;
 

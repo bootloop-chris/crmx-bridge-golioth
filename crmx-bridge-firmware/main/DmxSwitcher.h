@@ -65,6 +65,8 @@ public:
 
   // These functions should be thread-safe.
   esp_err_t set_src_sink(const DmxSourceSink src, const DmxSourceSink sink);
+  DmxSourceSink get_src() const { return active_src; }
+  DmxSourceSink get_sink() const { return active_sink; }
 
   static DmxSwitcher &get_switcher();
 
@@ -73,12 +75,6 @@ public:
   DmxInterface &get_artnet_interface() { return artnet_interface; }
 
 protected:
-  /* Custom notifications start at 1. */
-  //   enum class Notification : uint32_t {
-  //     set_src = 1,
-  //     set_sink = 2,
-  //   };
-
   QueueHandle_t get_src_queue() {
     switch (active_src) {
     case DmxSourceSink::timo:

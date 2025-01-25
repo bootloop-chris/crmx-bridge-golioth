@@ -6,65 +6,128 @@
 
 using Action = std::function<void(void)>;
 
-template <typename DelegateT> struct ViewModelInterface {
+class ViewModel {
+  virtual void view_model_did_update() = 0;
+};
 
-  virtual void set_delegate(DelegateT *_delegate) { delegate = _delegate; }
+template <typename DataT, typename ActionsT, typename DelegateT>
+class ViewModel_impl : public ViewModel {
+public:
+  ViewModel_impl() : data(), actions(), delegate(nullptr) {}
+
+  virtual void bind_actions(const ActionsT &_actions) {
+    actions = _actions;
+    view_model_did_update();
+  }
+
+  virtual void set_data(const DataT &_data) {
+    data = _data;
+    view_model_did_update();
+  }
+
+  virtual void set_delegate(DelegateT *_delegate) {
+    delegate = _delegate;
+    view_model_did_update();
+  }
 
   virtual void view_model_did_update() {
     if (delegate) {
-      delegate->hydrate(*this);
+      delegate->set_data(data);
+      delegate->bind_actions(actions);
     }
   }
 
+  virtual const DataT &get_data() const { return data; }
+  virtual const ActionsT &get_actions() const { return actions; }
+
 protected:
+  DataT data;
+  ActionsT actions;
   DelegateT *delegate;
 };
 
-struct MenuStackViewModel;
+// ====================== Home Page ======================
 
-struct MenuStackViewModelDelegate {
-  virtual void set_data(const MenuStackViewModel &data) = 0;
-  virtual void set_actions(Action &onclick_title, Action &onclick_settings) = 0;
+struct MenuStackData {
+  std::string title;
 };
 
-struct MenuStackViewModel
-    : public ViewModelInterface<MenuStackViewModelDelegate> {
-  using Base = ViewModelInterface<MenuStackViewModelDelegate>;
-
-  void set_delegate(MenuStackViewModelDelegate *_delegate) override {
-    Base::set_delegate(_delegate);
-    if (delegate) {
-      delegate->set_actions(onclick_title, onclick_settings);
-    }
-  }
-
-  std::string title;
-
+struct MenuStackActions {
   Action onclick_title;
   Action onclick_settings;
 };
 
-struct HomePageViewModel;
-
-struct HomePageViewModelDelegate {
-  virtual void set_data(const HomePageViewModel &data) = 0;
-  virtual void set_actions(Action &onclick_output_en) = 0;
+struct MenuStackDelegate {
+  virtual void set_data(const MenuStackData &data) = 0;
+  virtual void bind_actions(const MenuStackActions &actions) = 0;
 };
 
-struct HomePageViewModel
-    : public ViewModelInterface<HomePageViewModelDelegate> {
-  using Base = ViewModelInterface<HomePageViewModelDelegate>;
+using MenuStackViewModel =
+    ViewModel_impl<MenuStackData, MenuStackActions, MenuStackDelegate>;
 
-  void set_delegate(HomePageViewModelDelegate *_delegate) override {
-    Base::set_delegate(_delegate);
-    if (delegate) {
-      delegate->set_actions(onclick_output_en);
-    }
-  }
-
-  MenuStackViewModel input;
-  MenuStackViewModel output;
+struct HomePageData {
+  MenuStackData input;
+  MenuStackData output;
   bool output_en;
+};
 
+struct HomePageActions {
+  MenuStackActions input_actions;
+  MenuStackActions output_actions;
   Action onclick_output_en;
+  Action onclick_settings;
+};
+
+struct HomePageDelegate {
+  virtual void set_data(const HomePageData &data) = 0;
+  virtual void bind_actions(const HomePageActions &actions) = 0;
+};
+
+using HomePageViewModel =
+    ViewModel_impl<HomePageData, HomePageActions, HomePageDelegate>;
+
+// ====================== Settings Page ======================
+
+struct SettingsPageData {
+  std::string title;
+  std::vector<std::string> items;
+};
+
+struct SettingsPageActions {
+  Action onclick_back_button;
+  std::vector<Action> item_actions;
+};
+
+struct SettingsPageDelegate {
+  virtual void set_data(const SettingsPageData &data) = 0;
+  virtual void bind_actions(const SettingsPageActions &actions) = 0;
+};
+
+using SettingsPageViewModel =
+    ViewModel_impl<SettingsPageData, SettingsPageActions, SettingsPageDelegate>;
+
+// ====================== Popup Selector ======================
+
+struct PopupSelectorData {
+  std::vector<std::string> choices;
+};
+
+struct PopupSelectorActions {
+  std::function<void(std::string)> on_select;
+};
+
+struct PopupSelectorDelegate {
+  virtual void set_data(const PopupSelectorData &data) = 0;
+  virtual void bind_actions(const PopupSelectorActions &actions) = 0;
+};
+
+using PopupSelectorViewModel =
+    ViewModel_impl<PopupSelectorData, PopupSelectorActions,
+                   PopupSelectorDelegate>;
+
+struct UIViewModels {
+  HomePageViewModel home;
+  PopupSelectorViewModel input_selector;
+  PopupSelectorViewModel output_selector;
+  SettingsPageViewModel settings;
 };

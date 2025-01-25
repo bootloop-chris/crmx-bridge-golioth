@@ -427,11 +427,8 @@ void hmi_task(void *pvParameters) {
   // === LED ===
   init_led();
 
-  static constexpr TickType_t update_period = pdMS_TO_TICKS(20);
+  static constexpr TickType_t update_period = pdMS_TO_TICKS(10);
   TickType_t xLastWakeTime;
-
-  int val = 0;
-  int32_t last_position = 0;
 
   while (1) {
     // Wait for incoming events on the event queue.
@@ -450,9 +447,10 @@ void hmi_task(void *pvParameters) {
     //   };
     //   set_led_color(hsl_color.to_rgb());
     // }
+    if (gpio_get_level(btn_bk_pin)) {
+    }
     vTaskDelayUntil(&xLastWakeTime, update_period);
   }
-  ESP_LOGE(TAG, "queue receive failed");
   ESP_ERROR_CHECK(rotary_encoder_uninit(&encoder));
 }
 
