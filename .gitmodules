@@ -3,6 +3,3 @@
 	url = https://github.com/someweisguy/esp_dmx.git
 [submodule "esp_dmx"]
 	tag = 4.1.0
-[submodule "crmx-bridge-firmware/components/esp32-rotary-encoder"]
-	path = crmx-bridge-firmware/components/esp32-rotary-encoder
-	url = https://github.com/DavidAntliff/esp32-rotary-encoder.git
