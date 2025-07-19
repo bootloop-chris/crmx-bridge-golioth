@@ -1,5 +1,6 @@
 
 #include "DmxSwitcher.h"
+#include "SettingsHandler.h"
 #include "TimoInterface.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -99,6 +100,12 @@ static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel,
                                  adc_cali_handle_t *out_handle);
 static void adc_calibration_deinit(adc_cali_handle_t handle);
 
+static void set_led_color(const RGBColor &color) {
+  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, color.red, 0);
+  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, color.green, 0);
+  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, color.blue, 0);
+}
+
 // --------------------- DMX ------------------------ //
 
 extern "C" void onboard_dmx_task(void *pvParameters) {
@@ -147,7 +154,6 @@ extern "C" void onboard_dmx_task(void *pvParameters) {
 
   while (true) {
     if (dmx_receive(dmx_in_cfg.port, &rx_meta, DMX_TIMEOUT_TICK)) {
-      // 513 to account for start code.. I think?
       if (rx_meta.err != DMX_OK ||
           rx_meta.size > sizeof(rx_packet.full_packet)) {
         ESP_LOGE(TAG, "DMX Packet Error: %d, %zu", rx_meta.err, rx_meta.size);
@@ -177,6 +183,38 @@ extern "C" void onboard_dmx_task(void *pvParameters) {
   }
 }
 
+class TaskNotifySettingsDelegate : public SettingsChangeDelegate {
+public:
+  TaskNotifySettingsDelegate(TaskHandle_t _task_handle)
+      : task_handle(_task_handle) {}
+
+  void on_settings_update(const SettingsHandler &settings) override {
+    if (task_handle != nullptr) {
+      xTaskNotify(task_handle, true, eSetValueWithOverwrite);
+    }
+  }
+
+private:
+  TaskHandle_t task_handle;
+};
+
+static TimoSoftwareConfig timo_config_from_settings() {
+  SettingsHandler &settings = SettingsHandler::shared();
+
+  using namespace TIMO;
+  return TimoSoftwareConfig{
+      .radio_en = settings.get_timo_radio_en(),
+      .tx_rx_mode = settings.get_timo_tx_rx(),
+      .rf_protocol = settings.rf_protocol,
+      .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
+      .rf_power = settings.tmo_opt_pwr,
+      .universe_color = settings.get_universe_color(),
+      // TODO: make device name setting work.
+      // .device_name = settings.device_name,
+      .device_name = "CRMXBridge",
+  };
+}
+
 extern "C" void timo_dmx_task(void *pvParameters) {
   DmxInterface *interface = static_cast<DmxInterface *>(pvParameters);
 
@@ -191,21 +229,12 @@ extern "C" void timo_dmx_task(void *pvParameters) {
   // Initialize the SPI bus
   ESP_ERROR_CHECK(
       spi_bus_initialize(timo_spi_bus, &spi_bus_cfg, SPI_DMA_CH_AUTO));
-  // Add the TIMO to it
-  // TODO: don't abort, just log error code.
   ESP_ERROR_CHECK(timo_interface.init(timo_spi_bus));
 
-  using namespace TIMO;
-  const TimoSoftwareConfig sw_config = {
-      .radio_en = false,
-      .tx_rx_mode = CONFIG::RADIO_TX_RX_MODE_T::TX,
-      .rf_protocol = RF_PROTOCOL::TX_PROTOCOL_T::CRMX,
-      .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
-      .rf_power = RF_POWER::OUTPUT_POWER_T::PWR_3_MW,
-      .universe_color = RGBColor::Red(),
-      .device_name = "CRMXBridge",
-  };
-  ESP_ERROR_CHECK(timo_interface.set_sw_config(sw_config));
+  // Settings are user-generated and therefore fallable. Allow the things to
+  // boot even if setting settings fails.
+  ESP_ERROR_CHECK_WITHOUT_ABORT(
+      timo_interface.set_sw_config(timo_config_from_settings()));
 
   ESP_LOGI(TAG, "Finished Timo Init");
 
@@ -223,6 +252,17 @@ extern "C" void timo_dmx_task(void *pvParameters) {
     }
 
     // TODO: Timo RX
+
+    // If a notification was recieved, a settings update occurred.
+    if (xTaskNotifyWait(0b1, 0, NULL, 0) == pdTRUE) {
+      TimoSoftwareConfig new_config = timo_config_from_settings();
+      if (new_config != timo_interface.get_sw_config()) {
+        timo_interface.set_sw_config(new_config);
+      }
+
+      // TODO: move this elsewhere
+      set_led_color(SettingsHandler::shared().get_universe_color());
+    }
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
   }
@@ -262,12 +302,8 @@ void init_led() {
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
   }
   ESP_ERROR_CHECK(ledc_fade_func_install(0));
-}
 
-static void set_led_color(const RGBColor &color) {
-  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, color.red, 0);
-  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, color.green, 0);
-  ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, color.blue, 0);
+  set_led_color(SettingsHandler::shared().get_universe_color());
 }
 
 #define LCD_PIXEL_CLOCK_HZ (400 * 1000)
@@ -487,36 +523,43 @@ extern "C" void app_main(void) {
   // Hold up the power rail
   gpio_set_level(pwr_in_ctrl_pin, true);
 
+  // Initialize settings
+  SettingsHandler &settings = SettingsHandler::shared();
+
   // Init DMX Switcher before initializing any sources or sinks.
   DmxSwitcher &switcher = DmxSwitcher::get_switcher();
   ESP_ERROR_CHECK(switcher.init());
 
+  // Immediately set the source and sync to the cached value.
+  switcher.set_src_sink(settings.input, settings.output);
+  switcher.set_output_en(settings.output_en);
+
   // Start onboard DMX
   TaskHandle_t onboard_dmx_task_handle;
-  if (xTaskCreate(onboard_dmx_task, "onboard_dmx", 4096,
-                  &switcher.get_onboard_interface(), 3,
-                  &onboard_dmx_task_handle) != pdPASS ||
+  if (xTaskCreatePinnedToCore(onboard_dmx_task, "onboard_dmx", 4096,
+                              &switcher.get_onboard_interface(), 3,
+                              &onboard_dmx_task_handle, 1) != pdPASS ||
       onboard_dmx_task_handle == nullptr) {
     ESP_LOGE(TAG, "Failed to create onboard_dmx task");
     abort();
   }
 
   // Start TIMO
-  // Disabled while working on the HMI
-  // TaskHandle_t timo_dmx_task_handle;
-  // if (xTaskCreate(timo_dmx_task, "timo_dmx", 4096,
-  //                 &switcher.get_timo_interface(), 3,
-  //                 &timo_dmx_task_handle) != pdPASS ||
-  //     timo_dmx_task_handle == nullptr) {
-  //   ESP_LOGE(TAG, "Failed to create timo_dmx task");
-  //   abort();
-  // }
-
-  switcher.set_src_sink(DmxSourceSink::onboard, DmxSourceSink::timo);
+  TaskHandle_t timo_dmx_task_handle = nullptr;
+  if (xTaskCreatePinnedToCore(timo_dmx_task, "timo_dmx", 4096,
+                              &switcher.get_timo_interface(), 3,
+                              &timo_dmx_task_handle, 1) != pdPASS ||
+      timo_dmx_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create timo_dmx task");
+    abort();
+  }
+  TaskNotifySettingsDelegate timo_task_notify_settings_change{
+      timo_dmx_task_handle};
+  settings.add_delegate(&timo_task_notify_settings_change);
 
   TaskHandle_t hmi_task_handle;
-  if (xTaskCreate(hmi_task, "hmi", 4096 * 4, nullptr, 4, &hmi_task_handle) !=
-          pdPASS ||
+  if (xTaskCreatePinnedToCore(hmi_task, "hmi", 4096 * 4, nullptr, 4,
+                              &hmi_task_handle, 0) != pdPASS ||
       hmi_task_handle == nullptr) {
     ESP_LOGE(TAG, "Failed to create hmi task");
     abort();
@@ -560,6 +603,8 @@ extern "C" void app_main(void) {
   if (do_calibration1_chan0) {
     adc_calibration_deinit(adc1_cali_chan0_handle);
   }
+
+  settings.remove_delegate(&timo_task_notify_settings_change);
 
   switcher.deinit();
   vTaskDelete(onboard_dmx_task_handle);

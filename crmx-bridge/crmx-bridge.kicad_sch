@@ -12221,6 +12221,16 @@
 		)
 		(uuid "1fdc4b02-9547-4f9b-a20f-28f86ba86fb5")
 	)
+	(text "Bug here - can't handle a software update!"
+		(exclude_from_sim no)
+		(at 68.58 224.028 0)
+		(effects
+			(font
+				(size 5 5)
+			)
+		)
+		(uuid "22e446e1-30a7-4f1e-b02c-8c42e1b9e0cd")
+	)
 	(text "GPIO3 High to\nuse USB JTAG"
 		(exclude_from_sim no)
 		(at 16.51 92.964 0)

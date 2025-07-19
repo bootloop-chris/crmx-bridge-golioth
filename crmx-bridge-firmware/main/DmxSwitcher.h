@@ -1,17 +1,12 @@
 #pragma once
 
+#include "SettingsHandler.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "util.h"
 #include <array>
 
 void dmx_switcher_task();
-
-enum class DmxSourceSink : uint32_t {
-  none,
-  timo,
-  onboard,
-  artnet,
-};
 
 static constexpr size_t dmx_packet_size = 512;
 static constexpr TickType_t dmx_switcher_period_min = pdMS_TO_TICKS(1);
@@ -56,7 +51,7 @@ protected:
   friend class DmxSwitcher;
 };
 
-class DmxSwitcher {
+class DmxSwitcher : public SettingsChangeDelegate {
 
 public:
   esp_err_t init();
@@ -65,14 +60,21 @@ public:
 
   // These functions should be thread-safe.
   esp_err_t set_src_sink(const DmxSourceSink src, const DmxSourceSink sink);
+  esp_err_t set_output_en(const bool en);
+
   DmxSourceSink get_src() const { return active_src; }
   DmxSourceSink get_sink() const { return active_sink; }
+
+  bool get_output_en() const { return output_en; }
 
   static DmxSwitcher &get_switcher();
 
   DmxInterface &get_timo_interface() { return timo_interface; }
   DmxInterface &get_onboard_interface() { return onboard_interface; }
   DmxInterface &get_artnet_interface() { return artnet_interface; }
+
+  // SettingsChangeDelegate
+  void on_settings_update(const SettingsHandler &settings) override;
 
 protected:
   QueueHandle_t get_src_queue() {
@@ -105,9 +107,10 @@ protected:
 
   TaskHandle_t switcher_task;
 
-  SemaphoreHandle_t src_sink_mutex_handle;
+  SemaphoreHandle_t inout_mutex;
   DmxSourceSink active_src;
   DmxSourceSink active_sink;
+  bool output_en;
 
   DmxInterface timo_interface;
   DmxInterface onboard_interface;

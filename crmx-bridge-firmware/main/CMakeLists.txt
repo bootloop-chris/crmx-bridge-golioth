@@ -1,6 +1,6 @@
 idf_component_register(
-    SRCS "main.cc" "SettingsRegistry.cc" "DmxSwitcher.cc" "TimoInterface.cc" "ssd1106.c"
-         "ui/ui_main.cc" "ui/HomePage.cc" "ui/Style.cc" "ui/ui_priv.cc" "ui/SettingsPage.cc" "ui/PopupSelector.cc" "ui/NavigationController.cc"
+    SRCS "main.cc" "SettingsHandler.cc" "DmxSwitcher.cc" "TimoInterface.cc" "ssd1106.c"
+         "ui/ui_main.cc" "ui/HomePage.cc" "ui/Style.cc" "ui/ui_priv.cc" "ui/SettingsPage.cc" "ui/NavigationController.cc"
     INCLUDE_DIRS "." "./ui"
     REQUIRES esp_dmx esp32-rotary-encoder esp_lcd
     PRIV_REQUIRES esp_adc

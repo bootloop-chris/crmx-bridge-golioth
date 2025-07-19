@@ -41,7 +41,8 @@ HomePageIOStack::HomePageIOStack(lv_obj_t *parent, lv_group_t *_group)
 
 void HomePageIOStack::set_data(const MenuStackData &data) {
   if (input_select_label) {
-    lv_label_set_text(input_select_label, data.title.c_str());
+    lv_label_set_text(input_select_label,
+                      ui_enum<DmxSourceSink>::to_string(data.io_type));
   }
 }
 

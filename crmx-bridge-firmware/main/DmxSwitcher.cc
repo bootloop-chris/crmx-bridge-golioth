@@ -68,8 +68,8 @@ esp_err_t DmxSwitcher::init() {
     return ESP_ERR_NO_MEM;
   }
 
-  src_sink_mutex_handle = xSemaphoreCreateMutex();
-  if (src_sink_mutex_handle == nullptr) {
+  inout_mutex = xSemaphoreCreateMutex();
+  if (inout_mutex == nullptr) {
     ESP_LOGE(TAG, "Could not create mutex!");
     return ESP_ERR_NO_MEM;
   }
@@ -82,6 +82,8 @@ esp_err_t DmxSwitcher::init() {
     return ESP_ERR_INVALID_STATE;
   }
 
+  SettingsHandler::shared().add_delegate(this);
+
   return ESP_OK;
 }
 
@@ -90,37 +92,65 @@ void DmxSwitcher::deinit() {
   timo_interface.deinit();
   onboard_interface.deinit();
   artnet_interface.deinit();
+  SettingsHandler::shared().remove_delegate(this);
 }
 
 void DmxSwitcher::dispatch() {
 
-  xSemaphoreTake(src_sink_mutex_handle, dmx_switcher_period_max);
+  xSemaphoreTake(inout_mutex, dmx_switcher_period_max);
   QueueHandle_t src_queue = get_src_queue();
   QueueHandle_t sink_queue = get_sink_queue();
-  xSemaphoreGive(src_sink_mutex_handle);
+  bool _output_en = output_en;
+  xSemaphoreGive(inout_mutex);
 
   if (src_queue == nullptr || sink_queue == nullptr) {
     return;
   }
 
   DmxPacket packet;
-  if (xQueueReceive(src_queue, &packet, dmx_switcher_period_max)) {
+  if (xQueueReceive(src_queue, &packet, dmx_switcher_period_max) &&
+      _output_en) {
     xQueueOverwrite(sink_queue, &packet);
   }
 }
 
 esp_err_t DmxSwitcher::set_src_sink(const DmxSourceSink src,
                                     const DmxSourceSink sink) {
-  bool taken = xSemaphoreTake(src_sink_mutex_handle, pdMS_TO_TICKS(2));
+  bool taken = xSemaphoreTake(inout_mutex, pdMS_TO_TICKS(2));
   if (taken) {
     active_src = src;
     active_sink = sink;
-    if (xSemaphoreGive(src_sink_mutex_handle) != pdPASS) {
-      return ESP_ERR_INVALID_RESPONSE;
+    if (xSemaphoreGive(inout_mutex) != pdPASS) {
+      return ESP_FAIL;
     }
   } else {
     return ESP_ERR_TIMEOUT;
   }
 
   return ESP_OK;
+}
+
+esp_err_t DmxSwitcher::set_output_en(const bool en) {
+  bool taken = xSemaphoreTake(inout_mutex, pdMS_TO_TICKS(2));
+  if (taken) {
+    output_en = en;
+    if (xSemaphoreGive(inout_mutex) != pdPASS) {
+      return ESP_FAIL;
+    }
+  } else {
+    return ESP_ERR_TIMEOUT;
+  }
+
+  return ESP_OK;
+}
+
+void DmxSwitcher::on_settings_update(const SettingsHandler &settings) {
+  esp_err_t err = set_src_sink(settings.input, settings.output);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set source/sink on settings update.");
+  }
+  err = set_output_en(settings.output_en);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set output enable on settings update.");
+  }
 }

@@ -134,6 +134,9 @@ esp_err_t TimoInterface::set_sw_config(const TimoSoftwareConfig &_sw_config) {
 
   INIT_GUARD();
 
+  // TODO: some settings cannot be set based on certain other settings. Codify
+  // this!
+
   esp_err_t res = ESP_OK;
 
   CONFIG config;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Enums.h"
 #include "lvgl.h"
 #include <functional>
 #include <string>
@@ -49,7 +50,7 @@ protected:
 // ====================== Home Page ======================
 
 struct MenuStackData {
-  std::string title;
+  DmxSourceSink io_type;
 };
 
 struct MenuStackActions {
@@ -106,28 +107,7 @@ struct SettingsPageDelegate {
 using SettingsPageViewModel =
     ViewModel_impl<SettingsPageData, SettingsPageActions, SettingsPageDelegate>;
 
-// ====================== Popup Selector ======================
-
-struct PopupSelectorData {
-  std::vector<std::string> choices;
-};
-
-struct PopupSelectorActions {
-  std::function<void(std::string)> on_select;
-};
-
-struct PopupSelectorDelegate {
-  virtual void set_data(const PopupSelectorData &data) = 0;
-  virtual void bind_actions(const PopupSelectorActions &actions) = 0;
-};
-
-using PopupSelectorViewModel =
-    ViewModel_impl<PopupSelectorData, PopupSelectorActions,
-                   PopupSelectorDelegate>;
-
 struct UIViewModels {
   HomePageViewModel home;
-  PopupSelectorViewModel input_selector;
-  PopupSelectorViewModel output_selector;
   SettingsPageViewModel settings;
 };
