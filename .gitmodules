@@ -1,5 +1,2 @@
-[submodule "crmx-bridge-firmware/components/esp_dmx"]
-	path = crmx-bridge-firmware/components/esp_dmx
-	url = https://github.com/someweisguy/esp_dmx.git
 [submodule "esp_dmx"]
 	tag = 4.1.0
