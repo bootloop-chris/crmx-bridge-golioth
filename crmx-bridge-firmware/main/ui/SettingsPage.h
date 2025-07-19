@@ -5,6 +5,40 @@
 #include "view_models.h"
 #include <string>
 
+enum SettingDisplayType {
+  on_off,
+  list_select,
+  int_select,
+};
+
+struct SettingOnOffSelectData {
+  bool value;
+  std::function<void(bool)> on_select;
+};
+
+struct SettingListSelectData {
+  std::string value;
+  std::vector<std::string> options;
+  std::function<void(std::string)> on_select;
+};
+
+struct SettingIntSelectData {
+  int value;
+  const int min;
+  const int max;
+  const bool wrap;
+  std::function<void(int)> on_select;
+};
+
+struct SettingListEntry {
+  SettingDisplayType type;
+  union {
+    SettingOnOffSelectData on_off;
+    SettingListSelectData list;
+    SettingIntSelectData num;
+  } data;
+};
+
 class SettingsPage : public UIComponent, public SettingsPageDelegate {
 
 public:
@@ -18,6 +52,8 @@ public:
   // Delegate
   void set_data(const SettingsPageData &data) override;
   void bind_actions(const SettingsPageActions &actions) override;
+
+  void populate_from_settings_list(std::vector<SettingListEntry> &list);
 
 protected:
   lv_obj_t *title_label;

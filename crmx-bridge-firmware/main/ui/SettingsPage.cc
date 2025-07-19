@@ -10,7 +10,8 @@
 SettingsPage::SettingsPage() : UIComponent(lv_obj_create(NULL)) {
   lv_obj_set_width(root, LV_PCT(100));
   lv_obj_set_height(root, LV_PCT(100));
-  lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_ON);
+  lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_style_bg_color(root, Style::fg_color, LV_PART_SCROLLBAR);
 
   title_label = lv_label_create(root);
   lv_label_set_text(title_label, "Settings");
@@ -73,3 +74,5 @@ void SettingsPage::bind_actions(const SettingsPageActions &actions) {
     item_actions[i] = actions.item_actions[i];
   }
 }
+
+void populate_from_settings_list(std::vector<SettingListEntry> &list) {}

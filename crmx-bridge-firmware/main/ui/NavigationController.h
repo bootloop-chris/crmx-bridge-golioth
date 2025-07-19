@@ -1,9 +1,11 @@
 #pragma once
 
+#include "PopupSelector.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ui.h"
 #include "view_models.h"
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -28,28 +30,32 @@ public:
 
   bool pop_screen();
 
-  template <typename PopupT> void show_popup(PopupT::ViewModelT &view_model) {
+  template <typename SelectorT>
+  void show_popup(const PopupSelectorData<SelectorT> &data,
+                  std::function<void(SelectorT)> action) {
     if (popup) {
       delete popup;
       popup = nullptr;
     }
-    PopupT *new_popup = new PopupT(lv_layer_top());
+    PopupSelector<SelectorT> *new_popup =
+        new PopupSelector<SelectorT>(lv_layer_top(), data, action);
     if (!new_popup) {
       ESP_LOGE(TAG, "Failed to create popup");
       return;
     }
-    view_model.set_delegate(new_popup);
 
     popup = new_popup;
     attach_indevs_to_group(popup->get_group());
   }
 
-  void dismiss_popup() {
+  bool dismiss_popup() {
     attach_indevs_to_group(nav_stack.back()->get_group());
     if (popup) {
       delete popup;
       popup = nullptr;
+      return true;
     }
+    return false;
   }
 
   UIViewModels &get_view_models() { return view_models; }

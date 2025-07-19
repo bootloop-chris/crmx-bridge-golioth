@@ -25,6 +25,12 @@ struct RGBColor {
   uint8_t green;
   uint8_t blue;
 
+  bool operator==(const RGBColor &c) const {
+    return red == c.red && green == c.green && blue == c.blue;
+  }
+
+  bool operator!=(const RGBColor &c) const { return !(*this == c); }
+
   static constexpr RGBColor Green() {
     return RGBColor{
         .red = 0,

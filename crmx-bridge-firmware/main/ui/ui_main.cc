@@ -1,45 +1,53 @@
+#include "Enums.h"
 #include "HomePage.h"
 #include "NavigationController.h"
 #include "PopupSelector.h"
+#include "SettingsHandler.h"
 #include "SettingsPage.h"
 #include "Style.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "ui.h"
+#include "util.h"
 
 #define TAG "UI"
 
-PopupSelectorActions input_selector_actions = {
-    .on_select =
-        [](std::string selection) {
-          // TODO: round-trip this
-          auto temp =
-              NavigationController::get().get_view_models().home.get_data();
-          temp.input.title = selection;
-          NavigationController::get().get_view_models().home.set_data(temp);
+HomePageData home_page_data_from_settings() {
+  auto &settings = SettingsHandler::shared();
+  return HomePageData{
+      .input = MenuStackData{.io_type = settings.input},
+      .output = MenuStackData{.io_type = settings.output},
+      .output_en = settings.output_en,
+  };
+}
 
-          NavigationController::get().dismiss_popup();
-        },
-};
-PopupSelectorActions output_selector_actions = {
-    .on_select = [](std::string selection) {
-      // TODO: round-trip this
-      auto temp = NavigationController::get().get_view_models().home.get_data();
-      temp.output.title = selection;
-      NavigationController::get().get_view_models().home.set_data(temp);
+// Actions
+static void on_select_input(DmxSourceSink selection) {
+  SettingsHandler::shared().input.write(selection);
 
-      NavigationController::get().dismiss_popup();
-    }};
+  NavigationController::get().get_view_models().home.set_data(
+      home_page_data_from_settings());
+  NavigationController::get().dismiss_popup();
+}
+
+static void on_select_output(DmxSourceSink selection) {
+  SettingsHandler::shared().output.write(selection);
+
+  NavigationController::get().get_view_models().home.set_data(
+      home_page_data_from_settings());
+  NavigationController::get().dismiss_popup();
+}
+
+const PopupSelectorData<DmxSourceSink> io_selector_data = {
+    .choices = arr_to_vec(ui_enum<DmxSourceSink>::as_list())};
 
 HomePageActions home_actions = {
     .input_actions =
         MenuStackActions{
             .onclick_title =
                 []() {
-                  NavigationController::get().show_popup<PopupSelector>(
-                      NavigationController::get()
-                          .get_view_models()
-                          .input_selector);
+                  NavigationController::get().show_popup<DmxSourceSink>(
+                      io_selector_data, on_select_input);
                 },
             .onclick_settings =
                 []() { ESP_LOGI(TAG, "Input settings clicked"); },
@@ -48,21 +56,19 @@ HomePageActions home_actions = {
         MenuStackActions{
             .onclick_title =
                 []() {
-                  NavigationController::get().show_popup<PopupSelector>(
-                      NavigationController::get()
-                          .get_view_models()
-                          .output_selector);
+                  NavigationController::get().show_popup<DmxSourceSink>(
+                      io_selector_data, on_select_output);
                 },
             .onclick_settings =
                 []() { ESP_LOGI(TAG, "Output settings clicked"); },
         },
     .onclick_output_en =
         []() {
-          // TODO: roundtrip this
-          auto temp =
-              NavigationController::get().get_view_models().home.get_data();
-          temp.output_en = !temp.output_en;
-          NavigationController::get().get_view_models().home.set_data(temp);
+          auto &settings = SettingsHandler::shared();
+          settings.output_en.write(!settings.output_en);
+
+          NavigationController::get().get_view_models().home.set_data(
+              home_page_data_from_settings());
         },
     .onclick_settings =
         []() {
@@ -73,37 +79,38 @@ HomePageActions home_actions = {
 
 SettingsPageActions settings_actions = {
     .onclick_back_button = []() { NavigationController::get().pop_screen(); },
-    .item_actions = {
-        []() { ESP_LOGI(TAG, "Setting 1 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 2 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 3 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 4 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 5 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 6 clicked"); },
-        []() { ESP_LOGI(TAG, "Setting 7 clicked"); },
-    },
+    .item_actions =
+        {
+            []() {
+              using ProtocolT = TIMO::RF_PROTOCOL::TX_PROTOCOL_T;
+              using DataT = PopupSelectorData<ProtocolT>;
+              static const DataT data = DataT{
+                  .choices = arr_to_vec(ui_enum<ProtocolT>::as_list()),
+              };
+              NavigationController::get().show_popup<ProtocolT>(
+                  data, [](ProtocolT selected) {
+                    SettingsHandler::shared().rf_protocol.write(selected);
+                    NavigationController::get().dismiss_popup();
+                  });
+            },
+        },
 };
 
 void ui_init() {
+  // First call to styles get calls init.
   Style::get();
   UIViewModels &models = NavigationController::get().get_view_models();
-  models.home.set_data(HomePageData{
-      .input = MenuStackData{.title = "DMX"},
-      .output = MenuStackData{.title = "CRMX"},
-      .output_en = true,
-  });
+
+  models.home.set_data(home_page_data_from_settings());
   models.settings.set_data(SettingsPageData{
       .title = "Settings",
-      .items = {"Setting 1", "Setting 2", "Setting 3", "4", "5", "6", "7"},
+      .items = {"TX: " +
+                std::string(ui_enum<SettingsHandler::RfProtocolT>::to_string(
+                    SettingsHandler::shared().rf_protocol))},
   });
-  PopupSelectorData io_selector_data = {.choices = {"DMX", "CRMX", "ARTNET"}};
-  models.input_selector.set_data(io_selector_data);
-  models.output_selector.set_data(io_selector_data);
 
   models.home.bind_actions(home_actions);
   models.settings.bind_actions(settings_actions);
-  models.input_selector.bind_actions(input_selector_actions);
-  models.output_selector.bind_actions(output_selector_actions);
 }
 
 void ui_tick() {}
