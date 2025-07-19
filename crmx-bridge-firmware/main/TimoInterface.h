@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Color.h"
-#include "SettingsHandler.h"
 #include "TimoReg.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -23,15 +22,6 @@ struct TimoSoftwareConfig {
   TIMO::RF_POWER::OUTPUT_POWER_T rf_power;
   RGBColor universe_color;
   std::string device_name;
-
-  bool operator==(const TimoSoftwareConfig &c) const {
-    return radio_en == c.radio_en && tx_rx_mode == c.tx_rx_mode &&
-           rf_protocol == c.rf_protocol && dmx_source == c.dmx_source &&
-           rf_power == c.rf_power && universe_color == c.universe_color &&
-           device_name == c.device_name;
-  }
-
-  bool operator!=(const TimoSoftwareConfig &c) const { return !(*this == c); }
 };
 
 struct TimoStatus {
@@ -111,19 +101,25 @@ public:
   esp_err_t set_sw_config(const TimoSoftwareConfig &_sw_config);
   const TimoSoftwareConfig &get_sw_config() const { return sw_config; }
 
-  // Config getters
+  esp_err_t set_radio_en(const bool en);
   bool get_radio_en() const { return sw_config.radio_en; }
+  esp_err_t set_rf_power(const TIMO::RF_POWER::OUTPUT_POWER_T pwr);
   TIMO::RF_POWER::OUTPUT_POWER_T get_rf_power() const {
     return sw_config.rf_power;
   }
+  esp_err_t set_rf_protocol(const TIMO::RF_PROTOCOL::TX_PROTOCOL_T protocol);
   TIMO::RF_PROTOCOL::TX_PROTOCOL_T get_rf_protocol() const {
     return sw_config.rf_protocol;
   }
+  esp_err_t set_tx_rx_mode(const TIMO::CONFIG::RADIO_TX_RX_MODE_T tx_rx_mode);
   TIMO::CONFIG::RADIO_TX_RX_MODE_T get_tx_rx_mode() const {
     return sw_config.tx_rx_mode;
   }
+  esp_err_t set_universe_color(const RGBColor color);
   RGBColor get_universe_color() const { return sw_config.universe_color; }
+  esp_err_t set_device_name(const std::string device_name);
   std::string get_device_name() const { return sw_config.device_name; }
+  esp_err_t set_dmx_source(const TIMO::DMX_SOURCE::DATA_SOURCE_T source);
 
   // Status functions
   esp_err_t get_dmx_source(TIMO::DMX_SOURCE::DATA_SOURCE_T &source);
@@ -133,14 +129,6 @@ public:
   esp_err_t write_dmx(const std::array<uint8_t, 512> &data);
 
 protected:
-  esp_err_t set_radio_en(const bool en);
-  esp_err_t set_rf_power(const TIMO::RF_POWER::OUTPUT_POWER_T pwr);
-  esp_err_t set_rf_protocol(const TIMO::RF_PROTOCOL::TX_PROTOCOL_T protocol);
-  esp_err_t set_tx_rx_mode(const TIMO::CONFIG::RADIO_TX_RX_MODE_T tx_rx_mode);
-  esp_err_t set_universe_color(const RGBColor color);
-  esp_err_t set_device_name(const std::string device_name);
-  esp_err_t set_dmx_source(const TIMO::DMX_SOURCE::DATA_SOURCE_T source);
-
   bool is_ready();
   bool wait_for_ready(const int64_t timeout_ms);
   esp_err_t send_cmd(const SpiCmd cmd, const uint8_t addr = 0);
@@ -149,7 +137,9 @@ protected:
 
   template <uint8_t addr, typename T, size_t len>
   esp_err_t write_reg(const Register<addr, T, len> &reg,
-                      const bool verify = true) {
+                      const bool verify = true, TickType_t verify_delay = pdMS_TO_TICKS(10)) {
+
+    static_assert(pdMS_TO_TICKS(10) > 2, "Default delay should be more than 1 tick");
     memcpy(tx_buf.data.data(), reg.raw(), reg.raw_len());
     tx_buf.prep_tx();
     rx_buf.clear();
@@ -160,8 +150,7 @@ protected:
     }
 
     if (verify) {
-      vTaskDelay(pdMS_TO_TICKS(5));
-
+      vTaskDelay(verify_delay);
       Register<addr, T, len> readback;
       esp_err_t res = read_reg(readback);
       if (res != ESP_OK || reg != readback) {

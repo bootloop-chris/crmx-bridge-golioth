@@ -131,11 +131,9 @@ esp_err_t TimoInterface::init(const spi_host_device_t bus) {
 }
 
 esp_err_t TimoInterface::set_sw_config(const TimoSoftwareConfig &_sw_config) {
+  static_assert(pdMS_TO_TICKS(10) > 2, "tick rate must be > 200Hz");
 
   INIT_GUARD();
-
-  // TODO: some settings cannot be set based on certain other settings. Codify
-  // this!
 
   esp_err_t res = ESP_OK;
 
@@ -143,7 +141,8 @@ esp_err_t TimoInterface::set_sw_config(const TimoSoftwareConfig &_sw_config) {
   config.set(CONFIG::RADIO_ENABLE, _sw_config.radio_en)
       .set(CONFIG::RADIO_TX_RX_MODE, _sw_config.tx_rx_mode)
       .set(CONFIG::UART_EN, false);
-  res = ESP_ERROR_CHECK_WITHOUT_ABORT(write_reg(config));
+  // Writing the config register may cause a reboot, give it time...
+  res = ESP_ERROR_CHECK_WITHOUT_ABORT(write_reg(config, /* verify */ true, /* verify_delay */pdMS_TO_TICKS(2000)));
   if (res != ESP_OK) {
     return res;
   }
@@ -152,7 +151,8 @@ esp_err_t TimoInterface::set_sw_config(const TimoSoftwareConfig &_sw_config) {
 
   vTaskDelay(pdMS_TO_TICKS(10));
 
-  res = set_rf_protocol(_sw_config.rf_protocol);
+  // Writing the rf_protocol register may cause a reboot, give it time...
+  res = ESP_ERROR_CHECK_WITHOUT_ABORT(write_reg(config, /* verify */ true, /* verify_delay */pdMS_TO_TICKS(2000)));
   if (res != ESP_OK) {
     return res;
   }

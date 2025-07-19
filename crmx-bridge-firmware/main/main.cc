@@ -202,16 +202,25 @@ static TimoSoftwareConfig timo_config_from_settings() {
   SettingsHandler &settings = SettingsHandler::shared();
 
   using namespace TIMO;
+  // return TimoSoftwareConfig{
+  //     .radio_en = settings.get_timo_radio_en(),
+  //     .tx_rx_mode = settings.get_timo_tx_rx(),
+  //     .rf_protocol = settings.rf_protocol,
+  //     .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
+  //     .rf_power = settings.tmo_opt_pwr,
+  //     .universe_color = settings.get_universe_color(),
+  //     // TODO: make device name setting work.
+  //     // .device_name = settings.device_name,
+  //     .device_name = "CRMXBridge",
+  // };
   return TimoSoftwareConfig{
-      .radio_en = settings.get_timo_radio_en(),
-      .tx_rx_mode = settings.get_timo_tx_rx(),
-      .rf_protocol = settings.rf_protocol,
-      .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
-      .rf_power = settings.tmo_opt_pwr,
-      .universe_color = settings.get_universe_color(),
-      // TODO: make device name setting work.
-      // .device_name = settings.device_name,
-      .device_name = "CRMXBridge",
+    .radio_en = true,
+    .tx_rx_mode = CONFIG::RADIO_TX_RX_MODE_T::TX,
+    .rf_protocol = RF_PROTOCOL::TX_PROTOCOL_T::CRMX,
+    .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
+    .rf_power = RF_POWER::OUTPUT_POWER_T::PWR_3_MW,
+    .universe_color = RGBColor::Red(),
+    .device_name = "CRMXGolioth",
   };
 }
 
