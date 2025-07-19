@@ -1,2 +1,5 @@
 [submodule "esp_dmx"]
 	tag = 4.1.0
+[submodule "crmx-bridge-firmware/golioth-firmware-sdk"]
+	path = crmx-bridge-firmware/golioth-firmware-sdk
+	url = git@github.com:golioth/golioth-firmware-sdk.git
