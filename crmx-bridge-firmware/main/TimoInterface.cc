@@ -16,7 +16,6 @@ static constexpr char const *TAG = "TIMO";
 
 using namespace TIMO;
 
-// TODO: rename
 bool TimoInterface::is_ready() {
   // Device is ready if IRQ pin is low.
   return is_init && !gpio_get_level(hw_config.nirq_pin);

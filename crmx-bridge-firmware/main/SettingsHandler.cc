@@ -32,13 +32,14 @@ bool Infra::init() {
 } // namespace SettingsInternal
 
 SettingsHandler &SettingsHandler::shared() {
-  if (!settings_shared.is_init) {
-    settings_shared.init();
-  }
   return settings_shared;
 }
 
 void SettingsHandler::init() {
+  if (is_init)
+  {
+    return;
+  }
 
   const bool should_reset = infra.init();
 

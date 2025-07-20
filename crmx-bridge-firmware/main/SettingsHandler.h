@@ -129,6 +129,7 @@ public:
 
   static SettingsHandler &shared();
 
+  void init();
   void read_all();
 
   esp_err_t add_delegate(SettingsChangeDelegate *delegate) {
@@ -218,7 +219,6 @@ public:
 protected:
   static constexpr const char *TAG = "NVS";
 
-  void init();
   void notify_delegates();
 
   bool is_init = false;

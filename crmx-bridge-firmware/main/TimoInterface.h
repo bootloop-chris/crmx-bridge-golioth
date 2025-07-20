@@ -22,6 +22,19 @@ struct TimoSoftwareConfig {
   TIMO::RF_POWER::OUTPUT_POWER_T rf_power;
   RGBColor universe_color;
   std::string device_name;
+  
+  // Equality operator for comparison
+  bool operator!=(const TimoSoftwareConfig& other) const {
+    return radio_en != other.radio_en ||
+           tx_rx_mode != other.tx_rx_mode ||
+           rf_protocol != other.rf_protocol ||
+           dmx_source != other.dmx_source ||
+           rf_power != other.rf_power ||
+           universe_color.red != other.universe_color.red ||
+           universe_color.green != other.universe_color.green ||
+           universe_color.blue != other.universe_color.blue ||
+           device_name != other.device_name;
+  }
 };
 
 struct TimoStatus {

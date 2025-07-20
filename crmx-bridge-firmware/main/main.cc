@@ -2,6 +2,9 @@
 #include "DmxSwitcher.h"
 #include "SettingsHandler.h"
 #include "TimoInterface.h"
+#include "wifi_task.h"
+#include "wifi_manager.h"
+#include "device_config.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
@@ -29,10 +32,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define LCD_PIXEL_CLOCK_HZ (400 * 1000)
+#define PIN_NUM_SDA 40
+#define PIN_NUM_SCL 39
+#define PIN_NUM_RST -1
+#define I2C_HW_ADDR 0x3C
+
+// The pixel number in horizontal and vertical
+#define LCD_H_RES 128
+#define LCD_V_RES 64
+// Bit number used to represent command and parameter
+#define LCD_CMD_BITS 8
+#define LCD_PARAM_BITS 8
+
 const static char *TAG = "main";
 
 static constexpr adc_channel_t pwr_btn_sns_chann = ADC_CHANNEL_3;
-static constexpr gpio_num_t pwr_in_ctrl_pin = GPIO_NUM_5;
+static constexpr gpio_num_t pwr_in_ctrl_pin = GPIO_NUM_37;
 static constexpr int pwr_btn_press_thresh_mv = 2500;
 
 static constexpr spi_host_device_t timo_spi_bus = SPI2_HOST;
@@ -45,7 +61,7 @@ static constexpr spi_bus_config_t spi_bus_cfg = {
     .max_transfer_sz = 0,
 };
 
-// TODO: adjust queue size
+// The SPI configuration for the TimoTwo CRMX Module
 static constexpr TimoHardwareConfig timo_config = {
     .nirq_pin = GPIO_NUM_9,
     .spi_devcfg =
@@ -54,7 +70,7 @@ static constexpr TimoHardwareConfig timo_config = {
             .cs_ena_pretrans = 6,
             .clock_speed_hz = 1 * 1000 * 1000, // 1 MHz
             .spics_io_num = GPIO_NUM_10,       // CS pin
-            .queue_size = 7, // 7 transactions queued at a time?
+            .queue_size = 1,
         },
 };
 
@@ -69,8 +85,7 @@ static constexpr gpio_num_t btn_enc_pin = GPIO_NUM_41;
 static constexpr gpio_num_t enc_a_pin = GPIO_NUM_37;
 static constexpr gpio_num_t enc_b_pin = GPIO_NUM_38;
 
-//------------- DMX Configs ---------------//
-
+// DMX Configuration for physical input and output ports
 struct dmx_port_config_t {
   dmx_port_t port;
   int tx_pin;
@@ -78,7 +93,6 @@ struct dmx_port_config_t {
   gpio_num_t de_pin;
   gpio_num_t nre_pin;
 };
-
 static constexpr dmx_port_config_t dmx_in_cfg = {
     .port = DMX_NUM_0,
     .tx_pin = 21,
@@ -86,7 +100,6 @@ static constexpr dmx_port_config_t dmx_in_cfg = {
     .de_pin = GPIO_NUM_14,
     .nre_pin = GPIO_NUM_48,
 };
-
 static constexpr dmx_port_config_t dmx_out_cfg = {
     .port = DMX_NUM_1,
     .tx_pin = 17,
@@ -95,10 +108,8 @@ static constexpr dmx_port_config_t dmx_out_cfg = {
     .nre_pin = GPIO_NUM_8,
 };
 
-static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel,
-                                 adc_atten_t atten,
-                                 adc_cali_handle_t *out_handle);
-static void adc_calibration_deinit(adc_cali_handle_t handle);
+// Encoder
+QueueHandle_t encoder_queue = nullptr;
 
 static void set_led_color(const RGBColor &color) {
   ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, color.red, 0);
@@ -106,8 +117,9 @@ static void set_led_color(const RGBColor &color) {
   ledc_set_duty_and_update(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, color.blue, 0);
 }
 
-// --------------------- DMX ------------------------ //
-
+/**
+ * DMX Task for physical DMX IO
+ */
 extern "C" void onboard_dmx_task(void *pvParameters) {
   DmxInterface *interface = static_cast<DmxInterface *>(pvParameters);
 
@@ -183,6 +195,9 @@ extern "C" void onboard_dmx_task(void *pvParameters) {
   }
 }
 
+/**
+ * Delegate implementation to notify a task when settings are changed
+ */
 class TaskNotifySettingsDelegate : public SettingsChangeDelegate {
 public:
   TaskNotifySettingsDelegate(TaskHandle_t _task_handle)
@@ -198,32 +213,27 @@ private:
   TaskHandle_t task_handle;
 };
 
+/**
+ * Construct a Timo software config from the values stored in NVS
+ */
 static TimoSoftwareConfig timo_config_from_settings() {
   SettingsHandler &settings = SettingsHandler::shared();
 
   using namespace TIMO;
-  // return TimoSoftwareConfig{
-  //     .radio_en = settings.get_timo_radio_en(),
-  //     .tx_rx_mode = settings.get_timo_tx_rx(),
-  //     .rf_protocol = settings.rf_protocol,
-  //     .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
-  //     .rf_power = settings.tmo_opt_pwr,
-  //     .universe_color = settings.get_universe_color(),
-  //     // TODO: make device name setting work.
-  //     // .device_name = settings.device_name,
-  //     .device_name = "CRMXBridge",
-  // };
   return TimoSoftwareConfig{
-    .radio_en = true,
-    .tx_rx_mode = CONFIG::RADIO_TX_RX_MODE_T::TX,
-    .rf_protocol = RF_PROTOCOL::TX_PROTOCOL_T::CRMX,
-    .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
-    .rf_power = RF_POWER::OUTPUT_POWER_T::PWR_3_MW,
-    .universe_color = RGBColor::Red(),
-    .device_name = "CRMXGolioth",
+      .radio_en = settings.get_timo_radio_en(),
+      .tx_rx_mode = settings.get_timo_tx_rx(),
+      .rf_protocol = settings.rf_protocol,
+      .dmx_source = DMX_SOURCE::DATA_SOURCE_T::NO_DATA,
+      .rf_power = settings.tmo_opt_pwr,
+      .universe_color = settings.get_universe_color(),
+      .device_name = "CRMXBridge",
   };
 }
 
+/**
+ * Run the TimoTwo interface
+ */
 extern "C" void timo_dmx_task(void *pvParameters) {
   DmxInterface *interface = static_cast<DmxInterface *>(pvParameters);
 
@@ -240,8 +250,8 @@ extern "C" void timo_dmx_task(void *pvParameters) {
       spi_bus_initialize(timo_spi_bus, &spi_bus_cfg, SPI_DMA_CH_AUTO));
   ESP_ERROR_CHECK(timo_interface.init(timo_spi_bus));
 
-  // Settings are user-generated and therefore fallable. Allow the things to
-  // boot even if setting settings fails.
+  // Settings are user-generated and therefore fallable. Allow boot to continue
+  // even if setting settings fails.
   ESP_ERROR_CHECK_WITHOUT_ABORT(
       timo_interface.set_sw_config(timo_config_from_settings()));
 
@@ -249,10 +259,12 @@ extern "C" void timo_dmx_task(void *pvParameters) {
 
   int64_t last_print = esp_timer_get_time();
 
-  TickType_t xLastWakeTime;
-  DmxPacket packet;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  DmxPacket packet{};
 
+  // Loop over the recieved frames and transmit them
   while (true) {
+    // Interface -> recieve blocks
     if (interface->recieve(packet, pdMS_TO_TICKS(5))) {
       if (timo_interface.write_dmx(packet.full_packet.data) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write dmx from source %d",
@@ -260,17 +272,12 @@ extern "C" void timo_dmx_task(void *pvParameters) {
       }
     }
 
-    // TODO: Timo RX
-
     // If a notification was recieved, a settings update occurred.
     if (xTaskNotifyWait(0b1, 0, NULL, 0) == pdTRUE) {
       TimoSoftwareConfig new_config = timo_config_from_settings();
       if (new_config != timo_interface.get_sw_config()) {
         timo_interface.set_sw_config(new_config);
       }
-
-      // TODO: move this elsewhere
-      set_led_color(SettingsHandler::shared().get_universe_color());
     }
 
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2));
@@ -315,20 +322,6 @@ void init_led() {
   set_led_color(SettingsHandler::shared().get_universe_color());
 }
 
-#define LCD_PIXEL_CLOCK_HZ (400 * 1000)
-#define PIN_NUM_SDA 40
-#define PIN_NUM_SCL 39
-#define PIN_NUM_RST -1
-#define I2C_HW_ADDR 0x3C
-
-// The pixel number in horizontal and vertical
-#define LCD_H_RES 128
-#define LCD_V_RES 64
-// Bit number used to represent command and parameter
-#define LCD_CMD_BITS 8
-#define LCD_PARAM_BITS 8
-
-QueueHandle_t encoder_queue = nullptr;
 
 int16_t enc_get_new_moves() {
   static int32_t last_position = 0;
@@ -357,7 +350,7 @@ void encoder_read(lv_indev_t *indev, lv_indev_data_t *data) {
 }
 
 void init_lvgl() {
-  // =============== From LVGL monochrome example ===============
+  // From LVGL monochrome example
   ESP_LOGI(TAG, "Initialize I2C bus");
   i2c_master_bus_handle_t i2c_bus = NULL;
   i2c_master_bus_config_t bus_config = {
@@ -373,7 +366,7 @@ void init_lvgl() {
   };
   ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &i2c_bus));
 
-  ESP_LOGI(TAG, "Install panel IO");
+  ESP_LOGI(TAG, "Install SSD1106 panel IO");
   esp_lcd_panel_io_handle_t io_handle = NULL;
   esp_lcd_panel_io_i2c_config_t io_config = {
       .dev_addr = I2C_HW_ADDR,
@@ -392,14 +385,14 @@ void init_lvgl() {
       .bits_per_pixel = 1,
   };
 
-  ESP_LOGI(TAG, "Install SSD1106 panel driver");
+  ESP_LOGI(TAG, "Installing SSD1106 panel driver");
   ESP_ERROR_CHECK(new_ssd1106(io_handle, &panel_config, &panel_handle));
 
   ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
   ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
   ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
-  ESP_LOGI(TAG, "Initialize LVGL");
+  ESP_LOGI(TAG, "Initializing LVGL");
   const lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
   lvgl_port_init(&lvgl_cfg);
 
@@ -433,12 +426,10 @@ void init_lvgl() {
   lv_indev_set_type(indev, LV_INDEV_TYPE_ENCODER);
   lv_indev_set_read_cb(indev, encoder_read);
 
-  ESP_LOGI(TAG, "Display LVGL Scroll Text");
-  // Lock the mutex due to the LVGL APIs are not thread-safe
+  // Lock the mutex - LVGL APIs are not thread-safe
   if (lvgl_port_lock(0)) {
-    /* Rotation of the screen */
+    // Init the UI
     lv_disp_set_rotation(disp, LV_DISPLAY_ROTATION_0);
-
     ui_init();
 
     // Release the mutex
@@ -448,7 +439,7 @@ void init_lvgl() {
 
 void hmi_task(void *pvParameters) {
 
-  // === Encoder ===
+  // Encoder
   rotary_encoder_info_t encoder = {};
   ESP_ERROR_CHECK(gpio_install_isr_service(0));
   ESP_ERROR_CHECK(rotary_encoder_init(&encoder, enc_a_pin, enc_b_pin));
@@ -469,159 +460,27 @@ void hmi_task(void *pvParameters) {
   };
   ESP_ERROR_CHECK(gpio_config(&config));
 
-  // === LED ===
+  // RGB LED
   init_led();
 
-  static constexpr TickType_t update_period = pdMS_TO_TICKS(10);
-  TickType_t xLastWakeTime;
+  TickType_t xLastWakeTime = xTaskGetTickCount();
 
   while (1) {
-    // Wait for incoming events on the event queue.
-    // rotary_encoder_event_t event = {0};
-    // if (xQueueReceive(encoder_queue, &event, update_period - 1) == pdTRUE) {
-
-    //   val += static_cast<int>(last_position - event.state.position);
-    //   val = val > 359 ? val - 360 : val;
-    //   val = val < 0 ? val + 360 : val;
-    //   last_position = event.state.position;
-
-    //   const HSLColor hsl_color = {
-    //       .hue = static_cast<float>(val),
-    //       .sat = 1.f,
-    //       .lightness = 0.1f,
-    //   };
-    //   set_led_color(hsl_color.to_rgb());
-    // }
     if (gpio_get_level(btn_bk_pin)) {
+      // TODO: implement back button functionality
     }
-    vTaskDelayUntil(&xLastWakeTime, update_period);
+
+    // Always set the LED to the CRMX universe color for now
+    set_led_color(SettingsHandler::shared().get_universe_color());
+  
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(50));
   }
   ESP_ERROR_CHECK(rotary_encoder_uninit(&encoder));
 }
 
-extern "C" void app_main(void) {
-  //-------------ADC1 Init---------------//
-  adc_oneshot_unit_handle_t adc1_handle;
-  adc_oneshot_unit_init_cfg_t init_config1 = {.unit_id = ADC_UNIT_1};
-  ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
-
-  //-------------ADC1 Config---------------//
-  adc_oneshot_chan_cfg_t config = {
-      .atten = ADC_ATTEN_DB_12,
-      .bitwidth = ADC_BITWIDTH_DEFAULT,
-  };
-  ESP_ERROR_CHECK(
-      adc_oneshot_config_channel(adc1_handle, pwr_btn_sns_chann, &config));
-
-  //-------------ADC1 Calibration Init---------------//
-  adc_cali_handle_t adc1_cali_chan0_handle = NULL;
-  bool do_calibration1_chan0 = adc_calibration_init(
-      ADC_UNIT_1, pwr_btn_sns_chann, config.atten, &adc1_cali_chan0_handle);
-
-  // Power pin config
-  gpio_config_t io_conf = {
-      .pin_bit_mask = (1ULL << pwr_in_ctrl_pin),
-      .mode = GPIO_MODE_OUTPUT,
-      .pull_up_en = GPIO_PULLUP_DISABLE,
-      .pull_down_en = GPIO_PULLDOWN_DISABLE,
-      .intr_type = GPIO_INTR_DISABLE,
-  };
-
-  ESP_ERROR_CHECK(gpio_config(&io_conf));
-
-  // Hold up the power rail
-  gpio_set_level(pwr_in_ctrl_pin, true);
-
-  // Initialize settings
-  SettingsHandler &settings = SettingsHandler::shared();
-
-  // Init DMX Switcher before initializing any sources or sinks.
-  DmxSwitcher &switcher = DmxSwitcher::get_switcher();
-  ESP_ERROR_CHECK(switcher.init());
-
-  // Immediately set the source and sync to the cached value.
-  switcher.set_src_sink(settings.input, settings.output);
-  switcher.set_output_en(settings.output_en);
-
-  // Start onboard DMX
-  TaskHandle_t onboard_dmx_task_handle;
-  if (xTaskCreatePinnedToCore(onboard_dmx_task, "onboard_dmx", 4096,
-                              &switcher.get_onboard_interface(), 3,
-                              &onboard_dmx_task_handle, 1) != pdPASS ||
-      onboard_dmx_task_handle == nullptr) {
-    ESP_LOGE(TAG, "Failed to create onboard_dmx task");
-    abort();
-  }
-
-  // Start TIMO
-  TaskHandle_t timo_dmx_task_handle = nullptr;
-  if (xTaskCreatePinnedToCore(timo_dmx_task, "timo_dmx", 4096,
-                              &switcher.get_timo_interface(), 3,
-                              &timo_dmx_task_handle, 1) != pdPASS ||
-      timo_dmx_task_handle == nullptr) {
-    ESP_LOGE(TAG, "Failed to create timo_dmx task");
-    abort();
-  }
-  TaskNotifySettingsDelegate timo_task_notify_settings_change{
-      timo_dmx_task_handle};
-  settings.add_delegate(&timo_task_notify_settings_change);
-
-  TaskHandle_t hmi_task_handle;
-  if (xTaskCreatePinnedToCore(hmi_task, "hmi", 4096 * 4, nullptr, 4,
-                              &hmi_task_handle, 0) != pdPASS ||
-      hmi_task_handle == nullptr) {
-    ESP_LOGE(TAG, "Failed to create hmi task");
-    abort();
-  }
-
-  vTaskDelay(pdMS_TO_TICKS(1));
-
-  // Init graphics
-  init_lvgl();
-
-  // Handle power in the main task
-  uint64_t pwr_btn_press_start = 0;
-  bool pwr_btn_released = false;
-  while (1) {
-    int adc_raw = 0;
-    int adc_volts = 0;
-    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, pwr_btn_sns_chann, &adc_raw));
-    if (do_calibration1_chan0) {
-      ESP_ERROR_CHECK(
-          adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &adc_volts));
-      if (adc_volts < pwr_btn_press_thresh_mv) {
-        pwr_btn_released = true;
-      }
-      if (!pwr_btn_released || adc_volts < pwr_btn_press_thresh_mv) {
-        pwr_btn_press_start = esp_timer_get_time();
-      }
-
-      if (esp_timer_get_time() - pwr_btn_press_start > 1000000) {
-        ESP_LOGI(TAG, "Power button press detected, powering down.");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        gpio_set_level(pwr_in_ctrl_pin, false);
-        vTaskDelay(portMAX_DELAY);
-      }
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-
-  // Tear Down
-  ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
-  if (do_calibration1_chan0) {
-    adc_calibration_deinit(adc1_cali_chan0_handle);
-  }
-
-  settings.remove_delegate(&timo_task_notify_settings_change);
-
-  switcher.deinit();
-  vTaskDelete(onboard_dmx_task_handle);
-}
-
-/*---------------------------------------------------------------
-        ADC Calibration
----------------------------------------------------------------*/
+/**
+ * ADC Calibration
+ */
 static bool adc_calibration_init(adc_unit_t unit, adc_channel_t channel,
                                  adc_atten_t atten,
                                  adc_cali_handle_t *out_handle) {
@@ -681,4 +540,138 @@ static void adc_calibration_deinit(adc_cali_handle_t handle) {
   ESP_LOGI(TAG, "deregister %s calibration scheme", "Line Fitting");
   ESP_ERROR_CHECK(adc_cali_delete_scheme_line_fitting(handle));
 #endif
+}
+
+/**
+ * Finally, the main app
+ */
+extern "C" void app_main(void) {
+  // Initialize and configure ADC 1
+  adc_oneshot_unit_handle_t adc1_handle;
+  adc_oneshot_unit_init_cfg_t init_config1 = {.unit_id = ADC_UNIT_1};
+  ESP_ERROR_CHECK(adc_oneshot_new_unit(&init_config1, &adc1_handle));
+
+  adc_oneshot_chan_cfg_t config = {
+      .atten = ADC_ATTEN_DB_12,
+      .bitwidth = ADC_BITWIDTH_DEFAULT,
+  };
+  ESP_ERROR_CHECK(
+      adc_oneshot_config_channel(adc1_handle, pwr_btn_sns_chann, &config));
+
+  adc_cali_handle_t adc1_cali_chan0_handle = NULL;
+  bool do_calibration1_chan0 = adc_calibration_init(
+      ADC_UNIT_1, pwr_btn_sns_chann, config.atten, &adc1_cali_chan0_handle);
+
+  // Power pin config
+  gpio_config_t io_conf = {
+      .pin_bit_mask = (1ULL << pwr_in_ctrl_pin),
+      .mode = GPIO_MODE_OUTPUT,
+      .pull_up_en = GPIO_PULLUP_DISABLE,
+      .pull_down_en = GPIO_PULLDOWN_DISABLE,
+      .intr_type = GPIO_INTR_DISABLE,
+  };
+
+  ESP_ERROR_CHECK(gpio_config(&io_conf));
+
+  // Hold up the power rail
+  gpio_set_level(pwr_in_ctrl_pin, true);
+
+  // Multiple drivers need NVS, settings infrastructure will initialize it.
+  SettingsHandler &settings = SettingsHandler::shared();
+  settings.init();
+
+  // Init DMX Switcher before initializing any sources or sinks.
+  DmxSwitcher &switcher = DmxSwitcher::get_switcher();
+  ESP_ERROR_CHECK(switcher.init());
+
+  // Immediately set the source and sync to the cached value.
+  switcher.set_src_sink(settings.input, settings.output);
+  switcher.set_output_en(settings.output_en);
+
+  // Start onboard DMX
+  TaskHandle_t onboard_dmx_task_handle;
+  if (xTaskCreatePinnedToCore(onboard_dmx_task, "onboard_dmx", 4096,
+                              &switcher.get_onboard_interface(), 3,
+                              &onboard_dmx_task_handle, 1) != pdPASS ||
+      onboard_dmx_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create onboard_dmx task");
+    abort();
+  }
+
+  // Start TIMO
+  TaskHandle_t timo_dmx_task_handle = nullptr;
+  if (xTaskCreatePinnedToCore(timo_dmx_task, "timo_dmx", 4096,
+                              &switcher.get_timo_interface(), 3,
+                              &timo_dmx_task_handle, 1) != pdPASS ||
+      timo_dmx_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create timo_dmx task");
+    abort();
+  }
+  TaskNotifySettingsDelegate timo_task_notify_settings_change{
+      timo_dmx_task_handle};
+  settings.add_delegate(&timo_task_notify_settings_change);
+
+  // Start HMI
+  TaskHandle_t hmi_task_handle;
+  if (xTaskCreatePinnedToCore(hmi_task, "hmi", 4096 * 4, nullptr, 4,
+                              &hmi_task_handle, 0) != pdPASS ||
+      hmi_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create hmi task");
+    abort();
+  }
+
+  // Start Wifi task
+  TaskHandle_t wifi_task_handle;
+  if (xTaskCreatePinnedToCore(wifi_task, "wifi", 8192, nullptr, 3,
+                              &wifi_task_handle, 0) != pdPASS ||
+      wifi_task_handle == nullptr) {
+    ESP_LOGE(TAG, "Failed to create wifi task");
+    abort();
+  }
+
+  // Wait a milisecond for good luck
+  vTaskDelay(pdMS_TO_TICKS(1));
+
+  // Init graphics
+  init_lvgl();
+
+  // Finally, handle power in the main task
+  uint64_t pwr_btn_press_start = 0;
+  bool pwr_btn_released = false;
+  while (1) {
+    int adc_raw = 0;
+    int adc_volts = 0;
+    ESP_ERROR_CHECK(adc_oneshot_read(adc1_handle, pwr_btn_sns_chann, &adc_raw));
+    if (do_calibration1_chan0) {
+      ESP_ERROR_CHECK(
+          adc_cali_raw_to_voltage(adc1_cali_chan0_handle, adc_raw, &adc_volts));
+      if (adc_volts < pwr_btn_press_thresh_mv) {
+        pwr_btn_released = true;
+      }
+      if (!pwr_btn_released || adc_volts < pwr_btn_press_thresh_mv) {
+        pwr_btn_press_start = esp_timer_get_time();
+      }
+
+      if (esp_timer_get_time() - pwr_btn_press_start > 1000000) {
+        ESP_LOGI(TAG, "Power button press detected, powering down.");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        gpio_set_level(pwr_in_ctrl_pin, false);
+        vTaskDelay(portMAX_DELAY);
+      }
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  // Tear Down
+  ESP_ERROR_CHECK(adc_oneshot_del_unit(adc1_handle));
+  if (do_calibration1_chan0) {
+    adc_calibration_deinit(adc1_cali_chan0_handle);
+  }
+
+  settings.remove_delegate(&timo_task_notify_settings_change);
+
+  switcher.deinit();
+
+  vTaskDelete(onboard_dmx_task_handle);
 }

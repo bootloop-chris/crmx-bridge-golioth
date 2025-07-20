@@ -171,64 +171,6 @@ static esp_err_t ssd1106_init(esp_lcd_panel_t *_panel) {
                               ssd1106_max_width);
   }
 
-  //   ESP_RETURN_ON_ERROR(
-  //       esp_lcd_panel_io_tx_param(io, SSD1306_CMD_MIRROR_X_OFF, NULL, 0),
-  //       TAG, "io tx param SSD1306_CMD_MIRROR_X_OFF failed");
-  //   ESP_RETURN_ON_ERROR(
-  //       esp_lcd_panel_io_tx_param(io, SSD1306_CMD_MIRROR_Y_OFF, NULL, 0),
-  //       TAG, "io tx param SSD1306_CMD_MIRROR_Y_OFF failed");
-
-  //   dev->_width = width;
-  //   dev->_height = height;
-  //   dev->_pages = 8;
-  //   if (dev->_height == 32)
-  //     dev->_pages = 4;
-
-  //   uint8_t out_buf[27];
-  //   int out_index = 0;
-  //   out_buf[out_index++] = OLED_CONTROL_BYTE_CMD_STREAM;
-  //   out_buf[out_index++] = OLED_CMD_DISPLAY_OFF;   // AE
-  //   out_buf[out_index++] = OLED_CMD_SET_MUX_RATIO; // A8
-  //   if (dev->_height == 64)
-  //     out_buf[out_index++] = 0x3F;
-  //   if (dev->_height == 32)
-  //     out_buf[out_index++] = 0x1F;
-  //   out_buf[out_index++] = OLED_CMD_SET_DISPLAY_OFFSET; // D3
-  //   out_buf[out_index++] = 0x00;
-  //   // out_buf[out_index++] = OLED_CONTROL_BYTE_DATA_STREAM;	// 40
-  //   out_buf[out_index++] = OLED_CMD_SET_DISPLAY_START_LINE; // 40
-  //   // out_buf[out_index++] = OLED_CMD_SET_SEGMENT_REMAP;		// A1
-  //   if (dev->_flip) {
-  //     out_buf[out_index++] = OLED_CMD_SET_SEGMENT_REMAP_0; // A0
-  //   } else {
-  //     out_buf[out_index++] = OLED_CMD_SET_SEGMENT_REMAP_1; // A1
-  //   }
-  //   out_buf[out_index++] = OLED_CMD_SET_COM_SCAN_MODE;   // C8
-  //   out_buf[out_index++] = OLED_CMD_SET_DISPLAY_CLK_DIV; // D5
-  //   out_buf[out_index++] = 0x80;
-  //   out_buf[out_index++] = OLED_CMD_SET_COM_PIN_MAP; // DA
-  //   if (dev->_height == 64)
-  //     out_buf[out_index++] = 0x12;
-  //   if (dev->_height == 32)
-  //     out_buf[out_index++] = 0x02;
-  //   out_buf[out_index++] = OLED_CMD_SET_CONTRAST; // 81
-  //   out_buf[out_index++] = 0xFF;
-  //   out_buf[out_index++] = OLED_CMD_DISPLAY_RAM;       // A4
-  //   out_buf[out_index++] = OLED_CMD_SET_VCOMH_DESELCT; // DB
-  //   out_buf[out_index++] = 0x40;
-  //   out_buf[out_index++] = OLED_CMD_SET_MEMORY_ADDR_MODE; // 20
-  //   // out_buf[out_index++] = OLED_CMD_SET_HORI_ADDR_MODE;	// 00
-  //   out_buf[out_index++] = OLED_CMD_SET_PAGE_ADDR_MODE; // 02
-  //   // Set Lower Column Start Address for Page Addressing Mode
-  //   out_buf[out_index++] = 0x00;
-  //   // Set Higher Column Start Address for Page Addressing Mode
-  //   out_buf[out_index++] = 0x10;
-  //   out_buf[out_index++] = OLED_CMD_SET_CHARGE_PUMP; // 8D
-  //   out_buf[out_index++] = 0x14;
-  //   out_buf[out_index++] = OLED_CMD_DEACTIVE_SCROLL; // 2E
-  //   out_buf[out_index++] = OLED_CMD_DISPLAY_NORMAL;  // A6
-  //   out_buf[out_index++] = OLED_CMD_DISPLAY_ON;      // AF
-
   return ESP_OK;
 }
 
@@ -243,25 +185,6 @@ static esp_err_t ssd1106_draw_bitmap(esp_lcd_panel_t *_panel, int x_start,
   assert((x_start < x_end) && (y_start < y_end) &&
          "start position must be smaller than end position");
   esp_lcd_panel_io_handle_t io = panel->io;
-
-  // ESP_LOGI(TAG, "Render box: x: %d - %d, y: %d - %d", x_start, x_end,
-  // y_start,
-  //          y_end);
-
-  // adding extra gap
-  //   x_start += ssd1306->x_gap;
-  //   x_end += ssd1306->x_gap;
-  //   y_start += ssd1306->y_gap;
-  //   y_end += ssd1306->y_gap;
-
-  //   if (ssd1306->swap_axes) {
-  //     int x = x_start;
-  //     x_start = y_start;
-  //     y_start = x;
-  //     x = x_end;
-  //     x_end = y_end;
-  //     y_end = x;
-  //   }
 
   x_start += OFFSET_X;
   x_end += OFFSET_X;
