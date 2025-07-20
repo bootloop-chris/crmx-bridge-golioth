@@ -73,6 +73,15 @@ esp_err_t DmxSwitcher::init() {
     ESP_LOGE(TAG, "Could not create mutex!");
     return ESP_ERR_NO_MEM;
   }
+  
+  rpc_dmx_mutex = xSemaphoreCreateMutex();
+  if (rpc_dmx_mutex == nullptr) {
+    ESP_LOGE(TAG, "Could not create RPC DMX mutex!");
+    return ESP_ERR_NO_MEM;
+  }
+  
+  // Initialize RPC DMX universe to all zeros
+  memset(rpc_dmx_universe.data(), 0, rpc_dmx_universe.size());
 
   bool success = xTaskCreate(dmx_switcher_task, "dmx_switcher", 4092, this, 2,
                              &switcher_task);
@@ -93,6 +102,10 @@ void DmxSwitcher::deinit() {
   onboard_interface.deinit();
   artnet_interface.deinit();
   SettingsHandler::shared().remove_delegate(this);
+  
+  if (rpc_dmx_mutex) {
+    vSemaphoreDelete(rpc_dmx_mutex);
+  }
 }
 
 void DmxSwitcher::dispatch() {
@@ -153,4 +166,43 @@ void DmxSwitcher::on_settings_update(const SettingsHandler &settings) {
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to set output enable on settings update.");
   }
+}
+
+esp_err_t DmxSwitcher::set_dmx_value(int dmx_address, int value) {
+  // Validate inputs
+  if (dmx_address < 1 || dmx_address > 512) {
+    ESP_LOGE(TAG, "Invalid DMX address: %d (must be 1-512)", dmx_address);
+    return ESP_ERR_INVALID_ARG;
+  }
+  
+  if (value < 0 || value > 255) {
+    ESP_LOGE(TAG, "Invalid DMX value: %d (must be 0-255)", value);
+    return ESP_ERR_INVALID_ARG;
+  }
+  
+  // Update the RPC DMX universe state
+  bool taken = xSemaphoreTake(rpc_dmx_mutex, pdMS_TO_TICKS(10));
+  if (!taken) {
+    ESP_LOGE(TAG, "Failed to take RPC DMX mutex");
+    return ESP_ERR_TIMEOUT;
+  }
+  
+  // Set the requested address (DMX addresses are 1-based, array is 0-based)
+  rpc_dmx_universe[dmx_address - 1] = static_cast<uint8_t>(value);
+  
+  // Create a full DMX packet with current state
+  DmxPacket packet;
+  packet.source = DmxSourceSink::artnet; // Mark as coming from RPC/network
+  packet.full_packet.start_code = 0;
+  
+  // Copy current universe state
+  memcpy(packet.full_packet.data.data(), rpc_dmx_universe.data(), rpc_dmx_universe.size());
+  
+  xSemaphoreGive(rpc_dmx_mutex);
+  
+  // Send to the artnet interface (so it can be switched to output)
+  artnet_interface.send(packet);
+  
+  ESP_LOGI(TAG, "RPC: Set DMX address %d to value %d", dmx_address, value);
+  return ESP_OK;
 }

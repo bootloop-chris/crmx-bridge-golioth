@@ -72,6 +72,9 @@ public:
   DmxInterface &get_timo_interface() { return timo_interface; }
   DmxInterface &get_onboard_interface() { return onboard_interface; }
   DmxInterface &get_artnet_interface() { return artnet_interface; }
+  
+  // RPC interface for setting DMX values
+  esp_err_t set_dmx_value(int dmx_address, int value);
 
   // SettingsChangeDelegate
   void on_settings_update(const SettingsHandler &settings) override;
@@ -115,4 +118,8 @@ protected:
   DmxInterface timo_interface;
   DmxInterface onboard_interface;
   DmxInterface artnet_interface;
+  
+  // RPC DMX universe state
+  std::array<uint8_t, dmx_packet_size> rpc_dmx_universe;
+  SemaphoreHandle_t rpc_dmx_mutex;
 };

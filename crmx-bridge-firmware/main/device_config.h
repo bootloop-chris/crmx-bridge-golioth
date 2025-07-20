@@ -6,7 +6,7 @@
 
 // Default Golioth credentials (can be overridden via NVS)
 #define DEFAULT_GOLIOTH_PSK_ID  ""  // Set your Golioth PSK ID here
-#define DEFAULT_GOLIOTH_PSK     ""  // Set your Golioth PSK here
+#define DEFAULT_GOLIOTH_PSK     ""  // Set your Golioth PSK here - You'll need to provide this
 
 // Telemetry reporting interval
 #define TELEMETRY_INTERVAL_MS   (30 * 1000)  // 30 seconds
